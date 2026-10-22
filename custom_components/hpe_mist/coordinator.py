@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -36,6 +37,13 @@ from .errors import SourceAuthError, SourceBusyError, SourceError
 from .presence import PresenceTracker, Sighting, mac_key, mac_pretty
 from .seen import SeenClients
 from .source import Alarm, Client, Device, PresenceSource, Snapshot, Wlan
+
+
+@callback
+def registry_name(hass: HomeAssistant, mac: str) -> str | None:
+    """The name Home Assistant already has for this MAC (a Ring camera, a Sonos speaker...)."""
+    dev = dr.async_get(hass).async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac_pretty(mac))})
+    return (dev.name_by_user or dev.name) if dev else None
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -176,9 +184,14 @@ class HpeMistCoordinator(DataUpdateCoordinator[MistData]):
     def _client_event(self, event_type: str, mac: str) -> None:
         s = self.mist.clients[mac]
         self._emit(s.site_id, event_type, {
-            "mac": mac_pretty(mac), "name": self.picked.get(mac) or s.label, "hostname": s.hostname,
+            "mac": mac_pretty(mac), "name": self.client_name(s), "hostname": s.hostname,
             "ip": s.ip, "ssid": s.ssid, "ap": self.device_name(s.ap_mac), "tracked": mac in self.picked,
         })
+
+    @callback
+    def client_name(self, s: Sighting) -> str:
+        """Picked name, else Home Assistant's name for the MAC, else hostname / model / vendor."""
+        return self.picked.get(s.mac) or registry_name(self.hass, s.mac) or s.label
 
     def device_name(self, mac: str | None) -> str | None:
         dev = self.mist.devices.get(mac or "")

@@ -38,7 +38,7 @@ async def async_setup_entry(
             for mac, s in list(coordinator.mist.clients.items()):
                 if mac not in coordinator.picked:
                     uid = client_uid(entry, mac)
-                    yield uid, lambda mac=mac, uid=uid, label=s.label: MistClientTracker(coordinator, uid, mac, None, label)
+                    yield uid, lambda mac=mac, uid=uid, label=coordinator.client_name(s): MistClientTracker(coordinator, uid, mac, None, label)
 
     add_entities_as_seen(entry, coordinator, async_add_entities, candidates)
 

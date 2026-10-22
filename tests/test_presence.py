@@ -82,7 +82,8 @@ def test_client_label():
 
     assert client_label({"mac": KEY, "hostname": "phone-a"}) == "phone-a"
     assert client_label({"mac": "020000a3c7c2", "manufacture": "ExampleVendor"}) == "ExampleVendor a3:c7:c2"
-    assert client_label({"mac": "020000a3c7c2", "hostname": " "}) == "Unknown a3:c7:c2"
+    assert client_label({"mac": "020000a3c7c2", "hostname": " "}) == "02:00:00:a3:c7:c2"
+    assert client_label({"mac": "020000a3c7c2", "model": "Smart Plug", "manufacture": "ExampleVendor"}) == "Smart Plug a3:c7:c2"
 
 
 def test_device_from_mist_ap_and_switch():
@@ -207,10 +208,11 @@ def test_client_normalisation_band_and_seen_rows():
 
     wifi = seen_client_from_mist({"mac": "020000000057", "site_id": "s1", "last_ip": "192.0.2.57", "mfg": "Example Vendor",
                                   "last_ssid": "home-wifi", "last_ap": "020000000a40", "band": "24", "last_vlan": 200,
+                                  "last_model": "Unknown", "model": ["Unknown", "Smart Plug"],
                                   "timestamp": 1792675875.079}, wired=False)
     assert wifi == {"mac": "020000000057", "site_id": "s1", "ip": "192.0.2.57", "hostname": None,
-                    "manufacture": "Example Vendor", "ssid": "home-wifi", "ap_mac": "020000000a40", "rssi": None, "snr": None,
-                    "band": "2.4 GHz", "wired": False, "port": None, "switch_mac": None, "vlan": 200,
+                    "manufacture": "Example Vendor", "model": "Smart Plug", "ssid": "home-wifi", "ap_mac": "020000000a40",
+                    "rssi": None, "snr": None, "band": "2.4 GHz", "wired": False, "port": None, "switch_mac": None, "vlan": 200,
                     "last_seen": 1792675875.079}
     wired = seen_client_from_mist({"mac": "020000004cc0", "last_hostname": "dist-switch-2", "manufacture": "Juniper Networks",
                                    "last_vlan": -1, "last_port_id": "ge-0/0/2", "last_device_mac": "0200000001e9",

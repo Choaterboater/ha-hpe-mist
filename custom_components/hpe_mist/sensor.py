@@ -57,10 +57,7 @@ class MistSensorDescription(SensorEntityDescription):
 
 
 def _name(c: HpeMistCoordinator, s: Sighting) -> str:
-    """Tracked name, else hostname, else vendor + last 3 MAC bytes, else the MAC."""
-    if name := c.picked.get(s.mac) or (s.hostname or "").strip():
-        return name
-    return f"{s.manufacture} {mac_pretty(s.mac)[-8:]}" if s.manufacture else mac_pretty(s.mac)
+    return c.client_name(s)
 
 
 def _connected(c: HpeMistCoordinator, keep: Callable[[Sighting], bool]) -> list[Sighting]:

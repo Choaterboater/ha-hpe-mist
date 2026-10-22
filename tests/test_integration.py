@@ -244,12 +244,12 @@ async def test_options_flow_pick_connected_and_typed_mac_then_name(hass, aioclie
     r = await hass.config_entries.options.async_init(e.entry_id)
     assert r["step_id"] == "init"
     opts = r["data_schema"].schema["clients"].config["options"]
-    # Clients with a hostname first, then vendor + last 3 MAC bytes for the rest; never "?".
+    # Clients with a hostname first, then vendor + last 3 MAC bytes or the bare MAC; never "?".
     assert [o["label"] for o in opts] == [
         "laptop-b · 192.0.2.11 · 02:00:00:00:00:02 · connected now",
         f"phone-a · 192.0.2.10 · {PHONE} · connected now",
+        "02:00:00:00:00:03 · 192.0.2.13 · 02:00:00:00:00:03 · connected now",
         "ExampleVendor a3:c7:c2 · 192.0.2.12 · 02:00:00:a3:c7:c2 · ExampleVendor · connected now",
-        "Unknown 00:00:03 · 192.0.2.13 · 02:00:00:00:00:03 · connected now",
     ]
 
     r = await hass.config_entries.options.async_configure(r["flow_id"], {"clients": [PHONE], "extra_mac": "zz"})
@@ -815,3 +815,15 @@ async def test_no_live_stream_sensor_without_a_stream_host(hass, aioclient_mock,
     await setup(hass, e)
     assert hass.states.get("sensor.site_1_clients") is not None
     assert hass.states.get("binary_sensor.site_1_live_stream") is None
+
+
+async def test_client_named_by_another_integration(hass, aioclient_mock, stream):
+    # A camera another integration already knows by MAC is listed by that name, not its hostname.
+    other = MockConfigEntry(domain="example_camera")
+    other.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(config_entry_id=other.entry_id, name="Front door",
+                                           connections={(dr.CONNECTION_NETWORK_MAC, "02:00:00:00:00:02")})
+    mist(aioclient_mock, [PHONE_A, LAPTOP])
+    await setup(hass)
+    site = hass.states.get("sensor.site_1_clients")
+    assert [c["name"] for c in site.attributes["clients"]] == ["Front door", "Test Phone"]

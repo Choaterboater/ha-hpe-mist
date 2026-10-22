@@ -29,11 +29,15 @@ def mac_pretty(mac: Any) -> str:
 
 
 def client_label(client: Any) -> str:
-    """Hostname, or vendor + last 3 MAC bytes for clients without one ('Canon a3:c7:c2')."""
+    """Hostname, else Mist's fingerprint model or the vendor + last 3 MAC bytes ('Canon a3:c7:c2'), else the MAC."""
     get = client.get if isinstance(client, dict) else lambda k: getattr(client, k, None)
     if hostname := str(get("hostname") or "").strip():
         return hostname
-    return f"{get('manufacture') or 'Unknown'} {mac_pretty(get('mac'))[-8:]}".strip()
+    if model := str(get("model") or "").strip():
+        return f"{model} {mac_pretty(get('mac'))[-8:]}".strip()
+    if vendor := str(get("manufacture") or "").strip():
+        return f"{vendor} {mac_pretty(get('mac'))[-8:]}".strip()
+    return mac_pretty(get("mac")) or str(get("mac") or "")
 
 
 @dataclass
@@ -47,6 +51,7 @@ class Sighting:
     ip: str | None = None
     hostname: str | None = None
     manufacture: str | None = None
+    model: str | None = None
     ssid: str | None = None
     ap_mac: str | None = None
     rssi: float | None = None
@@ -83,7 +88,7 @@ class PresenceTracker:
         joined = not s.home
         s.last_seen = now
         s.home = True
-        for key in ("site_id", "ip", "hostname", "manufacture", "ssid", "rssi", "snr", "band", "vlan", "wired", "port"):
+        for key in ("site_id", "ip", "hostname", "manufacture", "model", "ssid", "rssi", "snr", "band", "vlan", "wired", "port"):
             if client.get(key) not in (None, ""):
                 setattr(s, key, client[key])
         s.ap_mac = mac_key(client.get("ap_mac")) or s.ap_mac

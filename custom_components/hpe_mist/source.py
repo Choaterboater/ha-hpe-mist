@@ -4,7 +4,7 @@ The coordinator only talks to a PresenceSource, so another controller (for
 example HPE Central) can be built on the same design. Everything a source
 returns is already normalised into the plain dicts described below.
 
-Client: mac, site_id, ip, hostname, manufacture, ssid, ap_mac, rssi, snr,
+Client: mac, site_id, ip, hostname, manufacture, model (Mist fingerprint), ssid, ap_mac, rssi, snr,
         band ("2.4 GHz" | "5 GHz" | "6 GHz"), wired, port (switch port when wired),
         switch_mac (wired), vlan, last_seen (epoch s).
 Device: mac, site_id, type ("ap" | "switch" | "gateway"), name, model, serial,
@@ -114,10 +114,19 @@ def _vlan(v: Any) -> int | None:
     return vlan if vlan is not None and vlan > 0 else None
 
 
+def _model(v: Any) -> str | None:
+    """Mist's fingerprint model; search rows give a list, and "Unknown" means none."""
+    for m in v if isinstance(v, list) else [v]:
+        if isinstance(m, str) and m.strip() and m.strip().lower() != "unknown":
+            return m.strip()
+    return None
+
+
 def client_from_mist(c: dict[str, Any]) -> Client:
     """A client connected now (/stats/clients row or stream frame)."""
     return {
         **{k: c.get(k) for k in CLIENT_KEYS},
+        "model": _model(c.get("model")),
         "snr": _int(c.get("snr")),
         "band": _CLIENT_BANDS.get(str(c.get("band"))),
         "wired": False,
@@ -136,6 +145,7 @@ def seen_client_from_mist(c: dict[str, Any], wired: bool) -> Client:
         "ip": c.get("last_ip") or None,
         "hostname": c.get("last_hostname") or None,
         "manufacture": c.get("mfg") or c.get("manufacture") or None,
+        "model": _model(c.get("last_model")) or _model(c.get("model")),
         "ssid": None if wired else c.get("last_ssid") or None,
         "ap_mac": None if wired else c.get("last_ap") or None,
         "rssi": None,
