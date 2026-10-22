@@ -1,0 +1,175 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to HPE Mist",
+        "description": "Pick the Mist cloud your org is on (the host in your Mist dashboard address, with \"manage\" replaced by \"api\"), or type another API host. Use an API token that can read the org where the clients connect; it is stored only in this config entry.",
+        "data": {
+          "host": "Mist cloud (API host)",
+          "token": "API token"
+        },
+        "data_description": {
+          "host": "For example api.mist.com or api.eu.mist.com.",
+          "token": "Create one in Mist under My account > API token, or an org token with read access."
+        }
+      },
+      "org": {
+        "title": "Pick the Mist org",
+        "description": "One entry per org. Add the integration again for another org.",
+        "data": {
+          "org_id": "Org"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Mist refused this token.",
+      "cannot_connect": "Could not reach Mist at that host.",
+      "no_orgs": "This token cannot see any org."
+    },
+    "abort": {
+      "already_configured": "This org is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Clients",
+        "description": "Any client works: phone, laptop, car, printer, IoT device. Tick clients to track by name (shown as name · ip · mac · vendor · connected now or when last seen). The list has every client Mist saw in the last 7 days, plus any this integration saw in the last 30. Or type the MAC of one that is not listed (separate several with commas). For a phone, use an address that stays the same for this network, not a rotating one.",
+        "data": {
+          "clients": "Clients",
+          "extra_mac": "MAC address not listed",
+          "add_all_clients": "Add all other clients (disabled until you enable them)"
+        },
+        "data_description": {
+          "add_all_clients": "Every client Mist reports gets a tracker you can enable in one click under Entities. Ticked clients are always enabled and get their own device."
+        }
+      },
+      "names": {
+        "title": "Name each client",
+        "description": "The name becomes the device and the tracker entity.\n\n{clients}"
+      }
+    },
+    "error": {
+      "invalid_mac": "That is not a MAC address (like 02:00:00:00:00:01).",
+      "invalid_auth": "Mist refused the saved token; remove and add the integration again.",
+      "cannot_connect": "Could not list connected clients from Mist right now. Clients seen earlier are still listed, and you can type a MAC."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "clients": {
+        "name": "Clients"
+      },
+      "wireless_clients": {
+        "name": "Wireless clients"
+      },
+      "wired_clients": {
+        "name": "Wired clients"
+      },
+      "aps_online": {
+        "name": "APs online"
+      },
+      "aps_offline": {
+        "name": "APs offline"
+      },
+      "active_alarms": {
+        "name": "Active alarms"
+      },
+      "ssid_clients": {
+        "name": "Clients on {ssid}"
+      },
+      "device_clients": {
+        "name": "Clients"
+      },
+      "cpu": {
+        "name": "CPU"
+      },
+      "memory": {
+        "name": "Memory"
+      },
+      "firmware": {
+        "name": "Firmware"
+      },
+      "last_restart": {
+        "name": "Last restart"
+      },
+      "radios": {
+        "name": "Radios"
+      },
+      "uplink": {
+        "name": "Uplink"
+      },
+      "wlans": {
+        "name": "WLANs"
+      },
+      "ports_up": {
+        "name": "Ports up"
+      },
+      "poe_draw": {
+        "name": "PoE draw"
+      },
+      "vlans": {
+        "name": "VLANs"
+      },
+      "radio_clients": {
+        "name": "{band} clients"
+      },
+      "radio_channel": {
+        "name": "{band} channel"
+      },
+      "radio_utilization": {
+        "name": "{band} utilization"
+      },
+      "radio_power": {
+        "name": "{band} power"
+      },
+      "radio_noise_floor": {
+        "name": "{band} noise floor"
+      },
+      "ip": {
+        "name": "IP address"
+      },
+      "ssid": {
+        "name": "SSID"
+      },
+      "ap": {
+        "name": "Access point"
+      },
+      "rssi": {
+        "name": "Signal"
+      }
+    },
+    "binary_sensor": {
+      "online": {
+        "name": "Online"
+      },
+      "port": {
+        "name": "Port {port}"
+      },
+      "stream": {
+        "name": "Live stream"
+      }
+    },
+    "event": {
+      "events": {
+        "name": "Events",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "client_joined": "Client joined",
+              "client_left": "Client left",
+              "device_down": "Device down",
+              "device_up": "Device up",
+              "alarm": "Alarm"
+            }
+          }
+        }
+      }
+    },
+    "switch": {
+      "wlan": {
+        "name": "WLAN {ssid}"
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "domain": "hpe_mist",
+  "name": "HPE Mist",
+  "codeowners": [
+    "@Choaterboater"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/Choaterboater/ha-hpe-mist",
+  "integration_type": "hub",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/Choaterboater/ha-hpe-mist/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
