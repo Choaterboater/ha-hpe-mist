@@ -1,6 +1,11 @@
 {
   "domain": "hpe_mist",
   "name": "HPE Mist",
+  "after_dependencies": [
+    "frontend",
+    "http",
+    "websocket_api"
+  ],
   "codeowners": [
     "@Choaterboater"
   ],
@@ -11,5 +16,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/Choaterboater/ha-hpe-mist/issues",
   "requirements": [],
-  "version": "0.1.2"
+  "version": "0.2.0"
 }

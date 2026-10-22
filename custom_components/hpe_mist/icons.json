@@ -1,0 +1,7 @@
+{
+  "services": {
+    "rename_client": {
+      "service": "mdi:rename"
+    }
+  }
+}

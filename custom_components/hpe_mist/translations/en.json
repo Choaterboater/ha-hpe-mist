@@ -171,5 +171,26 @@
         "name": "WLAN {ssid}"
       }
     }
+  },
+  "services": {
+    "rename_client": {
+      "name": "Rename client",
+      "description": "Gives a client the name to list it by. Leave the name empty to go back to the name the integration found.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "The client's MAC address."
+        },
+        "name": {
+          "name": "Name",
+          "description": "The new name; empty clears the typed name."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_mac": {
+      "message": "{mac} is not a MAC address."
+    }
   }
 }

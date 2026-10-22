@@ -8,17 +8,23 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import slugify
 
 from .api import MistClient
+from .cards import async_register_cards
 from .const import CONF_ADD_ALL, CONF_HOST, CONF_ORG_ID, CONF_TOKEN, DEFAULT_ADD_ALL, DOMAIN, MANUFACTURER
 from .coordinator import HpeMistCoordinator, tracked
 from .entity import ensure_site_devices
 from .errors import SourceError
+from .names import DATA_NAMES, ClientNames
+from .services import async_setup_services
 from .source import MistSource
+from .websocket import async_setup_websocket
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -29,7 +35,20 @@ PLATFORMS = [
     Platform.SWITCH,
 ]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 type HpeMistConfigEntry = ConfigEntry[HpeMistCoordinator]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Once for all entries: typed client names, the rename action, the client rows and the cards."""
+    names = ClientNames(hass)
+    await names.async_load()
+    hass.data[DATA_NAMES] = names
+    async_setup_services(hass)
+    async_setup_websocket(hass)
+    await async_register_cards(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HpeMistConfigEntry) -> bool:

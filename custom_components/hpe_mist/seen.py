@@ -13,7 +13,7 @@ from .presence import mac_key
 from .source import Client
 
 STORE_VERSION = 1
-_KEYS = ("mac", "site_id", "ip", "hostname", "manufacture", "model", "ssid", "ap_mac", "band", "wired", "port",
+_KEYS = ("mac", "site_id", "ip", "user_name", "hostname", "manufacture", "model", "ssid", "ap_mac", "band", "wired", "port",
          "switch_mac", "vlan", "last_seen")
 
 

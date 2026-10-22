@@ -34,16 +34,25 @@ from .const import (
     UNAVAILABLE_AFTER_SECONDS,
 )
 from .errors import SourceAuthError, SourceBusyError, SourceError
+from .names import saved_name
 from .presence import PresenceTracker, Sighting, mac_key, mac_pretty
 from .seen import SeenClients
 from .source import Alarm, Client, Device, PresenceSource, Snapshot, Wlan
 
 
 @callback
-def registry_name(hass: HomeAssistant, mac: str) -> str | None:
-    """The name Home Assistant already has for this MAC (a Ring camera, a Sonos speaker...)."""
-    dev = dr.async_get(hass).async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac_pretty(mac))})
-    return (dev.name_by_user or dev.name) if dev else None
+def known_name(hass: HomeAssistant, mac: str, user_name: str | None = None) -> str | None:
+    """A name someone gave this MAC: renamed in Home Assistant, else the login it used, else the name
+    the integration that owns the device gave it (a Ring camera, a Sonos speaker...)."""
+    # A MAC can be on several devices (another integration's, and ours for an AP or switch).
+    devices = dr.async_get(hass).async_get_devices(connections={(dr.CONNECTION_NETWORK_MAC, mac_pretty(mac))})
+    if renamed := next((d.name_by_user for d in devices if d.name_by_user), None):
+        return renamed
+    if user_name:
+        return user_name
+    ours = {e.entry_id for e in hass.config_entries.async_entries(DOMAIN)}
+    devices.sort(key=lambda d: d.config_entry_id in ours)  # another integration's name first
+    return next((d.name for d in devices if d.name), None)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -190,8 +199,30 @@ class HpeMistCoordinator(DataUpdateCoordinator[MistData]):
 
     @callback
     def client_name(self, s: Sighting) -> str:
-        """Picked name, else Home Assistant's name for the MAC, else hostname / model / vendor."""
-        return self.picked.get(s.mac) or registry_name(self.hass, s.mac) or s.label
+        """Picked or typed name, else a name someone gave the MAC, else hostname / model / vendor."""
+        return self.picked.get(s.mac) or saved_name(self.hass, s.mac) or self.found_name(s)
+
+    @callback
+    def found_name(self, s: Sighting) -> str:
+        """The name without the ones typed into this integration."""
+        return known_name(self.hass, s.mac, s.user_name) or s.label
+
+    @callback
+    def client_rows(self) -> list[dict[str, Any]]:
+        """Every client seen since start, for the client list card: everything Mist says, with its names."""
+        assert self.config_entry
+        sites = self.mist.sites
+        return [{
+            **s.details,
+            "domain": DOMAIN, "source": "Mist", "entry_id": self.config_entry.entry_id,
+            "mac": mac_pretty(s.mac), "name": self.client_name(s), "found_name": self.found_name(s),
+            "tracked": s.mac in self.picked, "connected": s.home, "last_seen": s.last_seen,
+            "site": sites.get(s.site_id or "") or s.site_id, "ip": s.ip, "user_name": s.user_name,
+            "hostname": s.hostname, "vendor": s.manufacture, "model": s.model, "wired": s.wired,
+            "ssid": None if s.wired else s.ssid, "band": None if s.wired else s.band, "vlan": s.vlan,
+            "ap": None if s.wired else self.device_name(s.ap_mac), "switch": self.device_name(s.switch_mac) if s.wired else None,
+            "port": s.port if s.wired else None, "rssi": s.rssi, "rssi_estimated": False, "snr": s.snr,
+        } for s in list(self.mist.clients.values()) if s.last_seen]
 
     def device_name(self, mac: str | None) -> str | None:
         dev = self.mist.devices.get(mac or "")

@@ -210,7 +210,7 @@ def test_client_normalisation_band_and_seen_rows():
                                   "last_ssid": "home-wifi", "last_ap": "020000000a40", "band": "24", "last_vlan": 200,
                                   "last_model": "Unknown", "model": ["Unknown", "Smart Plug"],
                                   "timestamp": 1792675875.079}, wired=False)
-    assert wifi == {"mac": "020000000057", "site_id": "s1", "ip": "192.0.2.57", "hostname": None,
+    assert wifi == {"mac": "020000000057", "site_id": "s1", "ip": "192.0.2.57", "user_name": None, "hostname": None,
                     "manufacture": "Example Vendor", "model": "Smart Plug", "ssid": "home-wifi", "ap_mac": "020000000a40",
                     "rssi": None, "snr": None, "band": "2.4 GHz", "wired": False, "port": None, "switch_mac": None, "vlan": 200,
                     "last_seen": 1792675875.079}

@@ -21,6 +21,12 @@ automation. One config entry per org gives you:
   device and sensors (IP address, SSID, access point, signal). With *Add all other
   clients* on (the default), every other client Mist reports gets a tracker too,
   **disabled until you enable it** in one click under Entities.
+- **Client names**: the first of the name you gave it (when picking it, or with the
+  rename box / `hpe_mist.rename_client`), a rename of its device in Home Assistant,
+  the login it authenticated with (802.1X; a MAC-auth login is the MAC and is
+  skipped), the name another integration gave the device with that MAC (a Ring
+  camera, a Sonos speaker), the DHCP hostname, Mist's device fingerprint
+  (`Yoto Player 4d:28`), the vendor + last 3 MAC bytes, the MAC.
 
 - **Controls**, only when the token may change things (org role *admin* or
   *write*), all **disabled by default**: a *Restart* button per AP, switch and
@@ -48,6 +54,31 @@ rows and kept out of the recorder.
 
 `wlans` (per AP) and `vlans` (per switch) exist in the shared design but Mist's
 device stats do not report them, so they do not appear for Mist.
+
+### Cards
+
+The integration adds three cards to the dashboard card picker (no YAML, no
+resources to add):
+
+- **HPE Client list**: every client from HPE Mist and HPE Central. Sortable
+  columns (click a header; again to reverse), search across every field, filters
+  (site, wired / wireless, network, type) and *Connected now*. Pick the columns in
+  the card editor: IP, network, connected to, signal, SNR, type, vendor, OS, site,
+  VLAN, band, channel, security, user name, hostname, MAC, connected for, last
+  seen, source. Clicking a client opens everything Mist gives for it (device
+  family, model, OS, channel, BSSID, PHY, key management, PSK, tx / rx rate and
+  throughput, guest, connected since…) and a rename box. *Download CSV* saves the
+  filtered list.
+- **HPE Access point** and **HPE Switch**: pick a device.
+
+The card reads its rows with the `hpe_mist/clients` websocket command while it
+is shown, so the long rows stay out of the state machine.
+
+### Actions
+
+| Action | Data | Does |
+|---|---|---|
+| `hpe_mist.rename_client` | `mac`, `name` | Names any client. An empty name goes back to the name the integration found. A picked client's name in the options changes too. Typed names are kept in `.storage/hpe_mist.client_names`. |
 
 ### Events
 

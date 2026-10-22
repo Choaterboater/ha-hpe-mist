@@ -34,7 +34,8 @@ from .const import (
     MIST_CLOUDS,
 )
 from .errors import SourceAuthError, SourceError
-from .coordinator import registry_name
+from .coordinator import known_name
+from .names import saved_name
 from .presence import client_label, mac_key, mac_pretty
 from .seen import SeenClients
 from .source import Client, MistSource
@@ -227,7 +228,7 @@ class HpeMistOptionsFlow(OptionsFlow):
         now = time.time()
         options: list[tuple[tuple[Any, ...], str, str]] = []
         for m, c in known.items():
-            label = registry_name(self.hass, m) or client_label(c)
+            label = saved_name(self.hass, m) or known_name(self.hass, m, c.get("user_name")) or client_label(c)
             self._hostnames[m] = label
             status = "connected now" if m in self._connected else f"seen {_ago(now - (c.get('last_seen') or now))}"
             parts = [label, c.get("ip") or "no ip", mac_pretty(m), c.get("manufacture"), status]

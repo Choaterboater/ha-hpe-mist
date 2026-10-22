@@ -29,10 +29,11 @@ def mac_pretty(mac: Any) -> str:
 
 
 def client_label(client: Any) -> str:
-    """Hostname, else Mist's fingerprint model or the vendor + last 3 MAC bytes ('Canon a3:c7:c2'), else the MAC."""
+    """Login, else hostname, else Mist's fingerprint model or the vendor + last 3 MAC bytes ('Canon a3:c7:c2'),
+    else the MAC."""
     get = client.get if isinstance(client, dict) else lambda k: getattr(client, k, None)
-    if hostname := str(get("hostname") or "").strip():
-        return hostname
+    if name := str(get("user_name") or "").strip() or str(get("hostname") or "").strip():
+        return name
     if model := str(get("model") or "").strip():
         return f"{model} {mac_pretty(get('mac'))[-8:]}".strip()
     if vendor := str(get("manufacture") or "").strip():
@@ -49,6 +50,7 @@ class Sighting:
     home: bool = False
     site_id: str | None = None
     ip: str | None = None
+    user_name: str | None = None
     hostname: str | None = None
     manufacture: str | None = None
     model: str | None = None
@@ -61,6 +63,7 @@ class Sighting:
     wired: bool = False
     port: str | None = None
     switch_mac: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)  # the rest, for the client list card
 
     @property
     def label(self) -> str:
@@ -88,9 +91,11 @@ class PresenceTracker:
         joined = not s.home
         s.last_seen = now
         s.home = True
-        for key in ("site_id", "ip", "hostname", "manufacture", "model", "ssid", "rssi", "snr", "band", "vlan", "wired", "port"):
+        for key in ("site_id", "ip", "user_name", "hostname", "manufacture", "model", "ssid", "rssi", "snr", "band", "vlan", "wired", "port"):
             if client.get(key) not in (None, ""):
                 setattr(s, key, client[key])
+        if isinstance(client.get("details"), dict):
+            s.details = client["details"]
         s.ap_mac = mac_key(client.get("ap_mac")) or s.ap_mac
         s.switch_mac = mac_key(client.get("switch_mac")) or s.switch_mac
         return joined

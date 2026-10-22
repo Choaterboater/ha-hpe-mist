@@ -1,0 +1,11 @@
+rename_client:
+  fields:
+    mac:
+      required: true
+      example: "02:00:00:00:00:01"
+      selector:
+        text:
+    name:
+      example: "Porch light"
+      selector:
+        text:

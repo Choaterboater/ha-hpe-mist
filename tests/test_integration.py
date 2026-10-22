@@ -827,3 +827,45 @@ async def test_client_named_by_another_integration(hass, aioclient_mock, stream)
     await setup(hass)
     site = hass.states.get("sensor.site_1_clients")
     assert [c["name"] for c in site.attributes["clients"]] == ["Front door", "Test Phone"]
+
+
+async def test_client_rows_with_details(hass, aioclient_mock, stream, hass_ws_client):
+    phone = {**PHONE_A, "username": "02-00-00-00-00-76", "family": "iPhone", "os": "iOS", "proto": "ax", "channel": 36,
+             "key_mgmt": "WPA3-SAE", "tx_rate": 573.5, "is_guest": False, "model": "Unknown", "assoc_time": 1792675000}
+    sso = {**LAPTOP, "username": "alex@example.com"}
+    mist(aioclient_mock, [phone, sso])
+    await setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "hpe_mist/clients"})
+    rows = {r["mac"]: r for r in (await ws.receive_json())["result"]["clients"]}
+    p = rows[PHONE]
+    # A MAC as the login (MAC auth) is no name; a real login is.
+    assert (p["name"], p["found_name"], p["user_name"], p["tracked"], p["source"]) == ("Test Phone", "phone-a", None, True, "Mist")
+    assert rows["02:00:00:00:00:02"]["found_name"] == "alex@example.com"
+    assert (p["rssi"], p["rssi_estimated"], p["snr"], p["ap"], p["band"]) == (-52, False, 41, "AP 1", "5 GHz")
+    assert {k: p.get(k) for k in ("family", "os", "phy", "channel", "key_mgmt", "tx_rate", "is_guest", "connected_since", "model")} == {
+        "family": "iPhone", "os": "iOS", "phy": "ax", "channel": 36, "key_mgmt": "WPA3-SAE", "tx_rate": 573.5,
+        "is_guest": False, "connected_since": 1792675000, "model": None}
+
+
+async def test_rename_client_action(hass, aioclient_mock, stream):
+    from homeassistant.exceptions import ServiceValidationError
+
+    mist(aioclient_mock, [PHONE_A, PRINTER])
+    e = await setup(hass)
+    names = lambda: [c["name"] for c in hass.states.get("sensor.site_1_clients").attributes["clients"]]  # noqa: E731
+    rename = lambda mac, name: hass.services.async_call(DOMAIN, "rename_client", {"mac": mac, "name": name}, blocking=True)  # noqa: E731
+
+    await rename("02-00-00-A3-C7-C2", "Office printer")
+    await hass.async_block_till_done()
+    assert "Office printer" in names()
+    await rename("02:00:00:a3:c7:c2", "")
+    await hass.async_block_till_done()
+    assert "ExampleVendor a3:c7:c2" in names()
+
+    await rename(PHONE, "Phone A")
+    await settle(hass)
+    assert e.options["tracked"] == {PHONE: "Phone A"}
+
+    with pytest.raises(ServiceValidationError):
+        await rename("not-a-mac", "x")

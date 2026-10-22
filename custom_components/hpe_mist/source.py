@@ -4,9 +4,10 @@ The coordinator only talks to a PresenceSource, so another controller (for
 example HPE Central) can be built on the same design. Everything a source
 returns is already normalised into the plain dicts described below.
 
-Client: mac, site_id, ip, hostname, manufacture, model (Mist fingerprint), ssid, ap_mac, rssi, snr,
-        band ("2.4 GHz" | "5 GHz" | "6 GHz"), wired, port (switch port when wired),
-        switch_mac (wired), vlan, last_seen (epoch s).
+Client: mac, site_id, ip, user_name (login, when it is not the MAC), hostname, manufacture,
+        model (Mist fingerprint), ssid, ap_mac, rssi, snr, band ("2.4 GHz" | "5 GHz" | "6 GHz"),
+        wired, port (switch port when wired), switch_mac (wired), vlan, last_seen (epoch s),
+        details {DETAIL_FIELDS key: value, connected_since (epoch s)} for the client list card.
 Device: mac, site_id, type ("ap" | "switch" | "gateway"), name, model, serial,
         ip, version, online, uptime (s), clients, cpu (%), memory (%),
         temperature (C),
@@ -122,11 +123,64 @@ def _model(v: Any) -> str | None:
     return None
 
 
+def _user_name(c: dict[str, Any], *keys: str) -> str | None:
+    """The login the client authenticated with; MAC auth logs in as the MAC, which is no name."""
+    for key in keys:
+        name = c.get(key)
+        name = (name[-1] if name else None) if isinstance(name, list) else name
+        if isinstance(name, str) and name.strip() and mac_key(name) != mac_key(c.get("mac")):
+            return name.strip()
+    return None
+
+
+# Everything else Mist says about a client, for the client list card: {our key: Mist's keys}.
+DETAIL_FIELDS = {
+    "family": ("family", "last_family"),
+    "os": ("os", "last_os"),
+    "os_version": ("os_version", "last_os_version"),
+    "group": ("group",),
+    "channel": ("channel",),
+    "bssid": ("bssid",),
+    "phy": ("proto",),
+    "key_mgmt": ("key_mgmt",),
+    "psk_name": ("psk_name",),
+    "is_guest": ("is_guest",),
+    "tx_rate": ("tx_rate",),
+    "rx_rate": ("rx_rate",),
+    "tx_bps": ("tx_bps",),
+    "rx_bps": ("rx_bps",),
+    "idle_time": ("idle_time",),
+    "vlan_name": ("last_vlan_name",),
+}
+
+
+def client_details(c: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, sources in DETAIL_FIELDS.items():
+        for src in sources:
+            value = c.get(src)
+            value = (value[-1] if value else None) if isinstance(value, list) else value
+            if isinstance(value, str):
+                value = value.strip()
+                if not value or value.lower() == "unknown":
+                    continue
+            if isinstance(value, (str, int, float, bool)):
+                out[key] = value
+                break
+    if (assoc := _num(c.get("assoc_time"))) is not None and assoc > 0:
+        out["connected_since"] = assoc
+    elif (uptime := _num(c.get("uptime"))) is not None:
+        out["connected_since"] = time.time() - uptime
+    return out
+
+
 def client_from_mist(c: dict[str, Any]) -> Client:
     """A client connected now (/stats/clients row or stream frame)."""
     return {
         **{k: c.get(k) for k in CLIENT_KEYS},
+        "user_name": _user_name(c, "username"),
         "model": _model(c.get("model")),
+        "details": client_details(c),
         "snr": _int(c.get("snr")),
         "band": _CLIENT_BANDS.get(str(c.get("band"))),
         "wired": False,
@@ -143,6 +197,7 @@ def seen_client_from_mist(c: dict[str, Any], wired: bool) -> Client:
         "mac": c.get("mac"),
         "site_id": c.get("site_id"),
         "ip": c.get("last_ip") or None,
+        "user_name": _user_name(c, "last_username", "username"),
         "hostname": c.get("last_hostname") or None,
         "manufacture": c.get("mfg") or c.get("manufacture") or None,
         "model": _model(c.get("last_model")) or _model(c.get("model")),
