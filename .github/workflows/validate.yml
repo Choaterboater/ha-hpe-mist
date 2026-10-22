@@ -15,8 +15,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # Icons ship inside the integration (custom_components/<domain>/brand/), which HA 2026.x shows.
-          ignore: brands
 
   hassfest:
     name: Hassfest
