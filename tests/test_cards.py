@@ -110,6 +110,20 @@ def test_device_picker_only_offers_network_devices():
     assert {"integration": "hpe_central", "domain": "binary_sensor", "device_class": "connectivity"} in out["entity"]
 
 
+def test_client_list_follows_the_options_unless_the_card_sets_its_own():
+    out = run(r"""
+const C = customElements.get("hpe-client-list-card");
+const settings = { columns: ["ip", "snr"], layout: "table" };
+const plain = new C(); plain.setConfig({}); plain._useSettings(settings);
+const own = new C(); own.setConfig({ columns: ["vendor"], layout: "list" }); own._useSettings(settings);
+console.log(JSON.stringify({ plain: [plain._config.columns, plain._config.layout], own: [own._config.columns, own._config.layout],
+  stub: C.getStubConfig() }));
+""")
+    assert out["plain"] == [["name", "ip", "snr"], "table"]
+    assert out["own"] == [["name", "vendor"], "list"]
+    assert "columns" not in out["stub"] and "layout" not in out["stub"]  # new cards follow the gear
+
+
 def test_client_list_shows_no_signal_for_wired_clients_and_no_unclassified_type():
     out = run(r"""
 const c = new (customElements.get("hpe-client-list-card"))();

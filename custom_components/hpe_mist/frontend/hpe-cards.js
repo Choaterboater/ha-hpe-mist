@@ -395,7 +395,8 @@ const CLIENT_FIELDS = [
 const TIME_FIELDS = new Set(["connected_since", "last_seen"]);
 
 class HpeClientListCard extends HTMLElement {
-  static getStubConfig() { return { columns: DEFAULT_COLUMNS, page_size: 25, connected_only: true }; }
+  // No columns or layout: a new card follows the integration's options (the gear) until set in the card editor.
+  static getStubConfig() { return { page_size: 25, connected_only: true }; }
 
   static getConfigForm() {
     return {
@@ -416,9 +417,12 @@ class HpeClientListCard extends HTMLElement {
   }
 
   setConfig(config) {
-    const columns = (config.columns || DEFAULT_COLUMNS).filter(c => c in CLIENT_COLUMNS && c !== "name");
-    this._config = { title: "Clients", page_size: 25, connected_only: true, layout: "auto", ...config,
-      columns: ["name", ...columns], page_size: Math.min(200, Math.max(5, Number(config.page_size) || 25)) };
+    this._own = { columns: Array.isArray(config.columns), layout: Boolean(config.layout) };
+    this._raw = config;
+    this._applyColumns(config.columns || this._settings?.columns || DEFAULT_COLUMNS);
+    this._config = { title: "Clients", page_size: 25, connected_only: true, ...config,
+      layout: config.layout || this._settings?.layout || "auto", columns: this._columns,
+      page_size: Math.min(200, Math.max(5, Number(config.page_size) || 25)) };
     this._sort = this._sort || { key: "name", dir: 1 };
     this._page = 0;
     this._open = this._open || null;
@@ -426,6 +430,18 @@ class HpeClientListCard extends HTMLElement {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this._built = false;
     if (this._hass) this._render();
+  }
+
+  _applyColumns(list) {
+    this._columns = ["name", ...list.filter(c => c in CLIENT_COLUMNS && c !== "name")];
+  }
+
+  // Columns and layout from the integration's options, used where the card sets none of its own.
+  _useSettings(settings) {
+    if (!settings || typeof settings !== "object") return;
+    this._settings = settings;
+    if (!this._own.columns && Array.isArray(settings.columns)) { this._applyColumns(settings.columns); this._config.columns = this._columns; }
+    if (!this._own.layout && settings.layout) this._config.layout = settings.layout;
   }
 
   set hass(hass) {
@@ -460,7 +476,10 @@ class HpeClientListCard extends HTMLElement {
     const rows = [];
     results.forEach((r, i) => {
       const name = domains[i] === "hpe_mist" ? "HPE Mist" : "HPE Central";
-      if (r.status === "fulfilled") rows.push(...(r.value?.clients || []).filter(c => c && typeof c === "object"));
+      if (r.status === "fulfilled") {
+        rows.push(...(r.value?.clients || []).filter(c => c && typeof c === "object"));
+        if (domains[i] === "hpe_central" || !this._settings) this._useSettings(r.value?.settings);
+      }
       else this._errors.push(`${name}: ${r.reason?.code === "unknown_command" ? "update the integration to 0.2.0 or later for this card" : r.reason?.message || "no answer"}`);
     });
     this._clients = rows;
