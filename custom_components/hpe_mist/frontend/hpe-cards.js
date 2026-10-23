@@ -366,6 +366,9 @@ const CLIENT_COLUMNS = {
   role: ["Role", r => r.role, r => r.role],
   band: ["Band", r => r.band, r => r.band],
   channel: ["Channel", r => r.channel, r => parseInt(r.channel, 10) || null],
+  phy: ["PHY type", r => r.phy, r => r.phy],
+  capabilities: ["802.11 capabilities", r => r.capabilities, r => r.capabilities],
+  bssid: ["BSSID", r => r.bssid, r => r.bssid],
   security: ["Security", r => [r.security, r.key_mgmt].filter(Boolean).join(" · ") || null, r => r.security || r.key_mgmt],
   auth: ["Auth", r => r.auth, r => r.auth],
   user_name: ["User name", r => r.user_name, r => r.user_name],
@@ -386,13 +389,28 @@ const CLIENT_FIELDS = [
   ["vlan", "VLAN"], ["vlan_name", "VLAN name"], ["role", "Role"], ["rssi", "RSSI (dBm)"], ["snr", "SNR (dB)"],
   ["tx_rate", "Tx rate (Mb/s)"], ["rx_rate", "Rx rate (Mb/s)"], ["tx_bps", "Tx (b/s)"], ["rx_bps", "Rx (b/s)"],
   ["vendor", "Vendor"], ["category", "Category"], ["family", "Family"], ["model", "Model"], ["os", "OS"],
-  ["function", "Function"], ["capabilities", "Capabilities"], ["phy", "PHY"], ["security", "Security"],
-  ["key_mgmt", "Key management"], ["auth", "Authentication"], ["tunnel", "Tunnel"], ["psk_name", "PSK"],
+  ["function", "Function"], ["capabilities", "802.11 capabilities"], ["phy", "PHY type"], ["security", "Security"],
+  ["key_mgmt", "Key management"], ["auth", "Auth type"], ["tunnel", "Tunnel"], ["psk_name", "PSK"],
   ["group", "Group"], ["is_guest", "Guest"], ["health", "Health"], ["status", "Status"],
   ["connected_device_type", "Connected device type"], ["connected_since", "Connected since"],
   ["idle_time", "Idle (s)"], ["last_seen", "Last seen"], ["source", "Source"], ["tracked", "Tracked"],
 ];
 const TIME_FIELDS = new Set(["connected_since", "last_seen"]);
+// The details panel: every field above, grouped. Empty fields and empty groups are left out.
+const CLIENT_SECTIONS = [
+  ["Client", ["name", "found_name", "user_name", "hostname", "mac", "ip", "ipv6", "site"]],
+  ["Wireless", ["ssid", "band", "channel", "snr", "rssi", "security", "key_mgmt", "phy", "auth", "capabilities", "bssid",
+    "tx_rate", "rx_rate", "tx_bps", "rx_bps"]],
+  ["Wired", ["switch", "port"]],
+  ["Network", ["vlan", "vlan_name", "role", "tunnel", "psk_name", "group", "is_guest"]],
+  ["Device", ["vendor", "category", "family", "model", "os", "function"]],
+  ["Connection", ["ap", "connected_to", "connected_device_type", "health", "status", "connected_since", "last_seen",
+    "idle_time", "source", "tracked"]],
+];
+const WIDE_FIELDS = new Set(["capabilities", "bssid"]);
+// good / mid / bad for a signal value; null for anything else.
+const quality = (k, v) => (!num(v) ? null : k === "snr" ? (v >= 25 ? "good" : v >= 15 ? "mid" : "bad")
+  : k === "rssi" ? (v >= -67 ? "good" : v >= -75 ? "mid" : "bad") : null);
 
 class HpeClientListCard extends HTMLElement {
   // No columns or layout: a new card follows the integration's options (the gear) until set in the card editor.
@@ -602,7 +620,9 @@ class HpeClientListCard extends HTMLElement {
   _details(r) {
     const value = (k, v) => (TIME_FIELDS.has(k) ? (num(v) ? new Date(v * 1000).toLocaleString() : null)
       : typeof v === "boolean" ? (v ? "Yes" : "No") : k === "rssi" && r.rssi_estimated ? `≈ ${v} (SNR + the AP radio's noise floor)` : v);
-    const items = CLIENT_FIELDS.map(([k, label]) => [label, value(k, r[k])]).filter(([, v]) => v !== null && v !== undefined && v !== "");
+    const labels = Object.fromEntries(CLIENT_FIELDS);
+    const sections = CLIENT_SECTIONS.map(([title, keys]) => [title, keys.map(k => [k, labels[k], value(k, r[k])])
+      .filter(([, , v]) => v !== null && v !== undefined && v !== "")]).filter(([, items]) => items.length);
     const input = h("input", { type: "text", class: "rename", value: r.name || "", placeholder: r.found_name || r.mac, "aria-label": `New name for ${r.name || r.mac}` });
     const status = h("span", { class: "muted", role: "status" });
     const save = async name => {
@@ -623,7 +643,14 @@ class HpeClientListCard extends HTMLElement {
         h("button", { type: "button", text: "Save", onclick: () => save(input.value.trim()) }),
         h("button", { type: "button", text: "Use found name", title: r.found_name || "", onclick: () => save("") }), status,
       ]),
-      h("dl", {}, items.flatMap(([label, v]) => [h("dt", { text: label }), h("dd", { text: v })])),
+      ...sections.map(([title, items]) => h("div", { class: "sect" }, [
+        h("h4", { text: title }),
+        h("div", { class: "kv" }, items.map(([k, label, v]) => h("div", { class: `kv-item${WIDE_FIELDS.has(k) ? " wide" : ""}` }, [
+          h("span", { text: label }),
+          h("b", { class: [quality(k, r[k]), k === "bssid" || k === "mac" ? "mono" : null].filter(Boolean).join(" "),
+            text: k === "snr" ? `${v} dB` : k === "rssi" && !r.rssi_estimated ? `${v} dBm` : v }),
+        ]))),
+      ])),
     ]));
   }
 
@@ -667,7 +694,12 @@ const CLIENT_STYLE = `
   .who .cname{font-weight:600;white-space:normal}.tr.open .cname{color:var(--primary-color)}
   .detail-row{border-bottom:1px solid var(--divider-color)}.details{padding:10px 12px 14px;background:var(--secondary-background-color);border-radius:8px;margin:6px 0 10px}
   .rename-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}.rename-row label{font-weight:600;font-size:13px}.rename{flex:1 1 200px;min-width:0}
-  dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0;font-size:13px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}
+  .sect{padding:10px 0 2px}.sect+.sect{border-top:1px solid var(--divider-color)}
+  .sect h4{margin:0 0 8px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--secondary-text-color)}
+  .kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 18px}.kv-item.wide{grid-column:1/-1}
+  .kv-item span{display:block;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color);margin-bottom:2px}
+  .kv-item b{display:block;font-weight:400;font-size:14px;overflow-wrap:anywhere}.kv-item b.mono{font-family:monospace;font-size:12px;color:var(--secondary-text-color)}
+  .kv-item b.good{color:var(--success-color,#4caf50)}.kv-item b.mid{color:var(--warning-color,#ffa600)}.kv-item b.bad{color:var(--error-color,#db4437)}
   .pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}.pagination[hidden]{display:none}.page-label{font-size:13px;color:var(--secondary-text-color)}
   @container clients (max-width:640px){${listStyle("mode-auto")}
   }${listStyle("mode-list")}

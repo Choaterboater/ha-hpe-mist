@@ -124,6 +124,37 @@ console.log(JSON.stringify({ plain: [plain._config.columns, plain._config.layout
     assert "columns" not in out["stub"] and "layout" not in out["stub"]  # new cards follow the gear
 
 
+def test_client_list_has_80211_capabilities_phy_and_bssid_columns():
+    out = run(r"""
+const CC = eval("CLIENT_COLUMNS");
+const r = { capabilities: "802.11ac, 802.11k", phy: "802.11a", bssid: "8c:79:09:76:5b:22" };
+console.log(JSON.stringify({ cap: [CC.capabilities[0], CC.capabilities[1](r)], phy: [CC.phy[0], CC.phy[1](r)], bssid: CC.bssid[1](r) }));
+""")
+    assert out["cap"] == ["802.11 capabilities", "802.11ac, 802.11k"]
+    assert out["phy"] == ["PHY type", "802.11a"] and out["bssid"] == "8c:79:09:76:5b:22"
+
+
+def test_client_details_are_grouped_with_a_wireless_section():
+    out = run(r"""
+const c = new (customElements.get("hpe-client-list-card"))();
+c.setConfig({});
+c._hass = { callService() {} };
+const panel = c._details({ name: "Phone", mac: "02:00:00:00:00:76", ssid: "outside", band: "5 GHz", channel: "56E (80 MHz)",
+  snr: 36, security: "CCM-128", key_mgmt: "OWE", phy: "802.11a", capabilities: "802.11ac, 802.11k, 802.11v",
+  bssid: "8c:79:09:76:5b:22", vendor: "Apple" });
+const sects = panel.all("sect").map(s => s.children[0].textContent.trim());
+const wireless = panel.all("sect").find(s => s.children[0].textContent.trim() === "Wireless");
+console.log(JSON.stringify({ sects, wireless: wireless.textContent, good: panel.all("good").map(e => e.textContent),
+  wide: panel.all("wide").length }));
+""")
+    assert out["sects"] == ["Client", "Wireless", "Device"]  # empty groups left out
+    for text in ("outside", "5 GHz", "56E (80 MHz)", "36 dB", "CCM-128", "OWE", "802.11a",
+                 "802.11ac, 802.11k, 802.11v", "8c:79:09:76:5b:22"):
+        assert text in out["wireless"], text
+    assert out["good"] == ["36 dB"]  # a strong SNR is shown in green
+    assert out["wide"] == 2  # capabilities and BSSID take a full row
+
+
 def test_client_list_shows_no_signal_for_wired_clients_and_no_unclassified_type():
     out = run(r"""
 const c = new (customElements.get("hpe-client-list-card"))();
