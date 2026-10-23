@@ -41,6 +41,18 @@ const num = v => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const numState = v => (v === null || v === undefined || v === "" ? null : num(Number(v)));
 const speed = s => (!num(s) ? "—" : s >= 1000 ? `${+(s / 1000).toFixed(1)}G` : `${s}M`);
 const portLabel = p => String(p).split(/[\/:]/).pop();
+// Stack member of a port: CX "3/1/14" is member 3, Juniper "ge-2/0/14" is FPC (member) 2; null for anything else.
+const portMember = p => { const m = /^(?:[a-z]+-)?(\d+)\/\d+\/\d+$/i.exec(String(p)); return m ? Number(m[1]) : null; };
+// [[member, ports]] in member order, ports in the order given; ports with no member last.
+function portGroups(ports) {
+  const groups = new Map();
+  for (const p of ports) {
+    const m = portMember(p.port);
+    if (!groups.has(m)) groups.set(m, []);
+    groups.get(m).push(p);
+  }
+  return [...groups].sort(([a], [b]) => (a ?? Infinity) - (b ?? Infinity));
+}
 
 const HPE_STYLE = `
   :host{display:block}ha-card{padding:16px;overflow:hidden}
@@ -61,7 +73,10 @@ const HPE_STYLE = `
   .bar>i{display:block;height:100%;background:var(--success-color,#4caf50)}
   .bar.mid>i{background:var(--warning-color,#ffa600)}.bar.hot>i{background:var(--error-color,#db4437)}
   .client{grid-template-columns:minmax(0,1fr) auto}.cname{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .ports{display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:4px}
+  .member{margin-top:6px}.member-head{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--secondary-text-color);margin-bottom:4px}
+  .member-head b{color:var(--primary-text-color)}
+  .faceplate{overflow-x:auto;padding:6px;border-radius:6px;border:1px solid var(--divider-color)}
+  .plate{display:grid;grid-template-rows:repeat(2,34px);grid-auto-flow:column;grid-auto-columns:minmax(28px,1fr);gap:4px}
   .port{height:34px;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;cursor:pointer;
         background:var(--secondary-background-color);color:var(--secondary-text-color);border:1px solid var(--divider-color);position:relative}
   .port.up{background:rgba(76,175,80,.18);color:var(--primary-text-color);border-color:var(--success-color,#4caf50)}
@@ -74,20 +89,29 @@ const HPE_STYLE = `
 
 class HpeDeviceCard extends HTMLElement {
   static key = "";
+  static sections = {};  // {name: label}: parts of the card that can be hidden, each a show_<name> option
   static getConfigForm() {
+    const sections = Object.entries(this.sections);
     return {
       schema: [
-        { name: "device", required: true, selector: { device: { filter: HPE_PLATFORMS.map(integration => ({ integration })) } } },
+        // Only devices with an Online sensor (APs, switches, gateways): clients and sites have none.
+        { name: "device", required: true, selector: { device: { filter: HPE_PLATFORMS.map(integration => ({ integration })),
+          entity: HPE_PLATFORMS.map(integration => ({ integration, domain: "binary_sensor", device_class: "connectivity" })) } } },
+        { name: "name", selector: { text: {} } },
         { name: "max_rows", selector: { number: { min: 0, max: 50, mode: "box" } } },
+        ...sections.map(([name]) => ({ name: `show_${name}`, selector: { boolean: {} } })),
       ],
-      computeLabel: s => ({ device: "Device", max_rows: "Rows to list (0 hides the list)" }[s.name]),
+      computeLabel: s => ({ device: "Device (an AP, switch or gateway)", name: "Name (empty: the device's name)",
+        max_rows: "Rows to list (0 hides the list)",
+        ...Object.fromEntries(sections.map(([name, label]) => [`show_${name}`, `Show ${label}`])) }[s.name]),
     };
   }
   static getStubConfig(hass) { return { device: hpeDevices(hass, this.key)[0]?.id || "" }; }
 
   setConfig(config) {
     if (!config.device) throw new Error("Pick a device");
-    this._config = { max_rows: 10, ...config };
+    const show = Object.fromEntries(Object.keys(this.constructor.sections).map(name => [`show_${name}`, true]));
+    this._config = { max_rows: 10, ...show, ...config };
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this._sig = null;
     if (this._hass) this.hass = this._hass;
@@ -124,7 +148,7 @@ class HpeDeviceCard extends HTMLElement {
     return h("div", { class: "head", onclick: () => this.moreInfo("online") }, [
       h("div", { class: `dot ${online === "on" ? "on" : online === "off" ? "off" : ""}`, title: online === "on" ? "Online" : "Offline" }),
       h("div", { class: "title" }, [
-        h("div", { class: "name", text: hpeName(device) }),
+        h("div", { class: "name", text: this._config.name || hpeName(device) }),
         h("div", { class: "sub", text: [device?.model || sub, site ? hpeName(site) : null, platform].filter(Boolean).join(" · ") }),
       ]),
       bigValue === null ? null : h("div", { class: "big" }, [h("b", { text: bigValue }), h("span", { text: bigLabel })]),
@@ -154,13 +178,16 @@ class HpeDeviceCard extends HTMLElement {
   }
 
   _render() {
-    const card = h("ha-card", {}, this.body());
+    // A client or a site has no Online sensor: say so instead of showing an empty card.
+    const card = h("ha-card", {}, this._ents.online ? this.body()
+      : h("div", { class: "empty", text: "This device is not an access point, switch or gateway. Pick one in the card editor." }));
     this.shadowRoot.replaceChildren(h("style", { text: HPE_STYLE }), card);
   }
 }
 
 class HpeAccessPointCard extends HpeDeviceCard {
   static key = "radios";
+  static sections = { radios: "radios", clients: "clients" };
 
   body() {
     const clients = this.attr("device_clients", "clients") || [];
@@ -173,9 +200,9 @@ class HpeAccessPointCard extends HpeDeviceCard {
     const parts = [this.header("Access point", count ?? "—", "clients"), this.chips([uplink, ...this.health(),
       ...Object.entries(bySsid).map(([ssid, n]) => [`${ssid} ${n}`])])];
 
-    parts.push(h("h3", { text: "Radios" }));
-    if (!radios.length) parts.push(h("div", { class: "empty", text: "No radio data yet." }));
-    for (const r of radios) {
+    if (this._config.show_radios) parts.push(h("h3", { text: "Radios" }));
+    if (this._config.show_radios && !radios.length) parts.push(h("div", { class: "empty", text: "No radio data yet." }));
+    for (const r of this._config.show_radios ? radios : []) {
       const u = num(r.utilization);
       const on = r.status === "up";
       parts.push(h("div", { class: "row radio", title: `Noise ${num(r.noise_floor) ?? "—"} dBm` }, [
@@ -190,7 +217,7 @@ class HpeAccessPointCard extends HpeDeviceCard {
       ]));
     }
 
-    if (this._config.max_rows > 0) {
+    if (this._config.show_clients && this._config.max_rows > 0) {
       parts.push(h("h3", { text: `Clients${clients.length ? ` (${clients.length})` : ""}` }));
       if (!clients.length) parts.push(h("div", { class: "empty", text: count === null ? "Client list unavailable." : "No clients connected." }));
       for (const c of clients.slice(0, this._config.max_rows)) {
@@ -210,6 +237,33 @@ class HpeAccessPointCard extends HpeDeviceCard {
 
 class HpeSwitchCard extends HpeDeviceCard {
   static key = "ports_up";
+  static sections = { ports: "ports", connected: "connected ports", clients: "wired clients", vlans: "VLANs" };
+
+  // One port tile; clicking it selects the port and shows its detail line.
+  portTile(p) {
+    return h("div", {
+      class: `port${p.up ? " up" : ""}${p.uplink ? " uplink" : ""}${this._selected === p.port ? " sel" : ""}`,
+      title: `${p.port}: ${p.up ? "up" : "down"}${p.speed ? " · " + speed(p.speed) : ""}${p.neighbor ? " · " + p.neighbor : ""}`,
+      onclick: () => { this._selected = this._selected === p.port ? null : p.port; this._sig = null; this.hass = this._hass; },
+    }, [h("span", { text: portLabel(p.port) }), p.poe_w ? h("small", { text: "⚡" }) : p.up ? h("small", { text: speed(p.speed) }) : null]);
+  }
+
+  // A stack (ports on more than one member) gets one front panel per member, two rows like the switch itself.
+  portPanels(ports) {
+    const groups = portGroups(ports);
+    if (groups.length === 1) return [h("div", { class: "ports" }, ports.map(p => this.portTile(p)))];
+    return groups.map(([member, rows]) => {
+      const up = rows.filter(p => p.up).length;
+      const poe = rows.reduce((sum, p) => sum + (num(p.poe_w) || 0), 0);
+      return h("div", { class: "member" }, [
+        h("div", { class: "member-head" }, [
+          h("b", { text: member === null ? "Other ports" : `Member ${member}` }),
+          h("span", { text: [`${up}/${rows.length} up`, poe ? `PoE ${+poe.toFixed(1)} W` : null].filter(Boolean).join(" · ") }),
+        ]),
+        h("div", { class: "faceplate" }, h("div", { class: "plate" }, rows.map(p => this.portTile(p)))),
+      ]);
+    });
+  }
 
   body() {
     const ports = this.attr("ports_up", "ports") || [];
@@ -223,14 +277,12 @@ class HpeSwitchCard extends HpeDeviceCard {
         this.val("device_clients") && [`${this.val("device_clients")} clients`, false, "device_clients"], ...this.health()]),
     ];
 
-    parts.push(h("h3", { text: "Ports" }));
-    if (!ports.length) parts.push(h("div", { class: "empty", text: "No port data yet." }));
+    const members = portGroups(ports).filter(([m]) => m !== null).length;
+    if (this._config.show_ports) parts.push(h("h3", { text: members > 1 ? `Ports · stack of ${members}` : "Ports" }));
+    if (!this._config.show_ports) { /* hidden in the card editor */ }
+    else if (!ports.length) parts.push(h("div", { class: "empty", text: "No port data yet." }));
     else {
-      parts.push(h("div", { class: "ports" }, ports.map(p => h("div", {
-        class: `port${p.up ? " up" : ""}${p.uplink ? " uplink" : ""}${this._selected === p.port ? " sel" : ""}`,
-        title: `${p.port}: ${p.up ? "up" : "down"}${p.speed ? " · " + speed(p.speed) : ""}${p.neighbor ? " · " + p.neighbor : ""}`,
-        onclick: () => { this._selected = this._selected === p.port ? null : p.port; this._sig = null; this.hass = this._hass; },
-      }, [h("span", { text: portLabel(p.port) }), p.poe_w ? h("small", { text: "⚡" }) : p.up ? h("small", { text: speed(p.speed) }) : null]))));
+      parts.push(...this.portPanels(ports));
       parts.push(h("div", { class: "legend" }, [h("span", { text: "green = up" }), h("span", { text: "blue edge = uplink" }), h("span", { text: "⚡ = PoE" })]));
       const sel = ports.find(p => p.port === this._selected);
       if (sel) parts.push(h("div", { class: "detail", text: [sel.port, sel.up ? "up" : "down", sel.speed && speed(sel.speed),
@@ -239,11 +291,11 @@ class HpeSwitchCard extends HpeDeviceCard {
     }
 
     const connected = ports.filter(p => p.up && (p.neighbor || p.poe_w || p.uplink));
-    if (this._config.max_rows > 0 && connected.length) {
+    if (this._config.show_connected && this._config.max_rows > 0 && connected.length) {
       parts.push(h("h3", { text: "Connected" }));
       for (const p of connected.slice(0, this._config.max_rows)) {
         parts.push(h("div", { class: "row conn" }, [
-          h("b", { text: (p.uplink ? "↑ " : "") + portLabel(p.port), title: p.port }), h("span", { text: speed(p.speed) }),
+          h("b", { text: (p.uplink ? "↑ " : "") + (members > 1 ? p.port : portLabel(p.port)), title: p.port }), h("span", { text: speed(p.speed) }),
           h("span", { class: "muted", text: p.poe_w ? `${p.poe_w} W` : "" }),
           h("span", { class: "cname", text: [p.neighbor, p.neighbor_port && `(${p.neighbor_port})`].filter(Boolean).join(" ") || p.description || "—" }),
           h("span", { class: "muted", text: p.vlan ? `v${p.vlan}` : "" }),
@@ -251,9 +303,22 @@ class HpeSwitchCard extends HpeDeviceCard {
       }
       if (connected.length > this._config.max_rows) parts.push(h("div", { class: "empty", text: `+${connected.length - this._config.max_rows} more` }));
     }
+    const wired = (this.attr("device_clients", "clients") || []).filter(c => c && typeof c === "object");
+    if (this._config.show_clients && this._config.max_rows > 0 && wired.length) {
+      parts.push(h("h3", { text: `Wired clients (${wired.length})` }));
+      for (const c of wired.slice(0, this._config.max_rows)) {
+        parts.push(h("div", { class: "row client", title: [c.mac, c.ip, c.vendor].filter(Boolean).join(" · ") }, [
+          h("div", {}, [h("div", { class: "cname", text: c.name || c.mac }),
+            h("div", { class: "muted", text: [c.ip, c.vlan && `VLAN ${c.vlan}`, c.vendor].filter(Boolean).join(" · ") })]),
+          h("b", { text: c.port || "", title: "port" }),
+        ]));
+      }
+      if (wired.length > this._config.max_rows) parts.push(h("div", { class: "empty", text: `+${wired.length - this._config.max_rows} more` }));
+    }
     const down = ports.filter(p => !p.up);
-    if (down.length && ports.length) parts.push(h("div", { class: "empty", text: `Down: ${down.map(p => p.port).join(", ")}` }));
-    if (vlans.length) parts.push(h("h3", { text: "VLANs" }), this.chips(vlans.map(v => [`${v.id}${v.name ? " " + v.name : ""}`])));
+    // A stack has hundreds of ports: the faceplates already show which are down.
+    if (this._config.show_ports && down.length && ports.length && members <= 1) parts.push(h("div", { class: "empty", text: `Down: ${down.map(p => p.port).join(", ")}` }));
+    if (this._config.show_vlans && vlans.length) parts.push(h("h3", { text: "VLANs" }), this.chips(vlans.map(v => [`${v.id}${v.name ? " " + v.name : ""}`])));
     return parts;
   }
 }
@@ -280,6 +345,9 @@ const since = s => {
 const ipKey = ip => (/^\d+\.\d+\.\d+\.\d+$/.test(ip || "") ? ip.split(".").reduce((a, o) => a * 256 + Number(o), 0) : null);
 const signalText = r => (num(r.rssi) !== null ? `${r.rssi_estimated ? "≈ " : ""}${r.rssi} dBm` : num(r.snr) !== null ? `SNR ${r.snr} dB` : null);
 const via = r => (r.wired ? [r.switch, r.port].filter(Boolean).join(" ") : r.ap || r.connected_to) || null;
+// The client's type; Central's "Unclassified" says nothing, so it counts as no type.
+const NO_TYPE = /^(unclassified|unknown)$/i;
+const clientType = r => { const t = r.category || r.family || r.model; return t && !NO_TYPE.test(String(t)) ? t : null; };
 
 // key: [header, text(row), sort value(row)]. Sort values that are null always sort last.
 const CLIENT_COLUMNS = {
@@ -287,9 +355,10 @@ const CLIENT_COLUMNS = {
   ip: ["IP address", r => r.ip, r => ipKey(r.ip) ?? r.ip],
   network: ["Network", r => (r.wired ? ["Wired", r.vlan && `VLAN ${r.vlan}`] : [r.ssid, r.band]).filter(Boolean).join(" · ") || null, r => (r.wired ? "~wired" : r.ssid)],
   connected_to: ["Connected to", via, via],
-  signal: ["Signal", signalText, r => r.rssi ?? (num(r.snr) !== null ? r.snr - 95 : null)],
+  // A wired client has no signal.
+  signal: ["Signal", r => (r.wired ? null : signalText(r)), r => (r.wired ? null : r.rssi ?? (num(r.snr) !== null ? r.snr - 95 : null))],
   snr: ["SNR", r => (num(r.snr) !== null ? `${r.snr} dB` : null), r => r.snr],
-  category: ["Type", r => r.category || r.family || r.model, r => r.category || r.family || r.model],
+  category: ["Type", clientType, clientType],
   vendor: ["Vendor", r => r.vendor, r => r.vendor],
   os: ["OS", r => r.os, r => r.os],
   site: ["Site", r => r.site, r => r.site],
@@ -336,15 +405,19 @@ class HpeClientListCard extends HTMLElement {
           options: Object.entries(CLIENT_COLUMNS).map(([value, [label]]) => ({ value, label })) } } },
         { name: "page_size", selector: { number: { min: 5, max: 200, mode: "box" } } },
         { name: "connected_only", selector: { boolean: {} } },
+        { name: "layout", selector: { select: { mode: "dropdown", options: [
+          { value: "auto", label: "Columns, or a list when the card is narrow" },
+          { value: "table", label: "Always columns (scrolls sideways when narrow)" },
+          { value: "list", label: "Always a list" }] } } },
       ],
       computeLabel: s => ({ title: "Title", columns: "Columns (Client is always first)", page_size: "Rows per page",
-        connected_only: "Only clients connected now (a switch on the card shows the rest)" }[s.name]),
+        connected_only: "Only clients connected now (a switch on the card shows the rest)", layout: "Layout" }[s.name]),
     };
   }
 
   setConfig(config) {
     const columns = (config.columns || DEFAULT_COLUMNS).filter(c => c in CLIENT_COLUMNS && c !== "name");
-    this._config = { title: "Clients", page_size: 25, connected_only: true, ...config,
+    this._config = { title: "Clients", page_size: 25, connected_only: true, layout: "auto", ...config,
       columns: ["name", ...columns], page_size: Math.min(200, Math.max(5, Number(config.page_size) || 25)) };
     this._sort = this._sort || { key: "name", dir: 1 };
     this._page = 0;
@@ -440,11 +513,11 @@ class HpeClientListCard extends HTMLElement {
     const site = this._options("site", "All sites", uniq(r => r.site));
     const conn = this._options("connection", "Wired and wireless", ["wireless", "wired"], v => (v === "wired" ? "Wired" : "Wireless"));
     const net = this._options("network", "All networks", uniq(r => (r.wired ? null : r.ssid)));
-    const cat = this._options("category", "All types", uniq(r => r.category || r.family || r.model));
+    const cat = this._options("category", "All types", uniq(clientType));
     const q = root.querySelector(".q").value.trim().toLocaleLowerCase();
     const out = rows.filter(r => (!site || String(r.site) === site) &&
       (!conn || (conn === "wired") === Boolean(r.wired)) && (!net || (!r.wired && r.ssid === net)) &&
-      (!cat || (r.category || r.family || r.model) === cat) &&
+      (!cat || clientType(r) === cat) &&
       (!q || Object.values(r).some(v => (typeof v === "string" || typeof v === "number") && String(v).toLocaleLowerCase().includes(q))));
     const [, , key] = CLIENT_COLUMNS[this._sort.key] || CLIENT_COLUMNS.name;
     const name = CLIENT_COLUMNS.name[2];
@@ -462,6 +535,7 @@ class HpeClientListCard extends HTMLElement {
     if (!this._built) this._build();
     const root = this.shadowRoot;
     root.querySelector(".title-text").textContent = this._config.title || "Clients";
+    root.querySelector(".body").className = `body mode-${["table", "list"].includes(this._config.layout) ? this._config.layout : "auto"}`;
     const cols = this._config.columns;
     const { rows, filtering, all } = this._filtered();
     this._visibleRows = rows;
@@ -471,6 +545,7 @@ class HpeClientListCard extends HTMLElement {
     const start = this._page * size, end = Math.min(rows.length, start + size);
     const table = root.querySelector(".table");
     table.style.setProperty("--cols", cols.map(c => (c === "name" ? "minmax(0,2fr)" : "minmax(0,1fr)")).join(" "));
+    table.style.setProperty("--n", cols.length);
     const header = h("div", { class: "tr th", role: "row" }, cols.map(c => {
       const active = this._sort.key === c;
       return h("div", { role: "columnheader", "aria-sort": active ? (this._sort.dir > 0 ? "ascending" : "descending") : "none" },
@@ -482,8 +557,10 @@ class HpeClientListCard extends HTMLElement {
       const open = this._open === r.mac;
       body.push(h("div", { class: `tr${open ? " open" : ""}${r.connected ? "" : " away"}`, role: "row" }, cols.map(c => {
         const text = CLIENT_COLUMNS[c][1](r);
-        if (c !== "name") return h("div", { class: "td", role: "cell", "data-label": CLIENT_COLUMNS[c][0], text: text ?? "—" });
-        const sub = [r.category || r.vendor, !r.connected && `seen ${ago(r.last_seen) || "earlier"}`].filter(Boolean).join(" · ");
+        // Empty cells show "—" in columns; the list layout leaves them out.
+        const blank = text === null || text === undefined || text === "";
+        if (c !== "name") return h("div", { class: `td${blank ? " blank" : ""}`, role: "cell", "data-label": CLIENT_COLUMNS[c][0], text: blank ? "—" : text });
+        const sub = [clientType(r) || r.vendor, !r.connected && `seen ${ago(r.last_seen) || "earlier"}`].filter(Boolean).join(" · ");
         return h("div", { class: "td id", role: "cell" }, h("button", { type: "button", class: "who", "aria-expanded": open ? "true" : "false",
           onclick: () => { this._open = open ? null : r.mac; this._render(); } }, [
           h("span", { class: "cname", text: text || r.mac }), sub ? h("span", { class: "muted", text: sub }) : null]));
@@ -548,6 +625,12 @@ class HpeClientListCard extends HTMLElement {
   }
 }
 
+// The stacked "label: value" layout: always in list mode, and in auto mode when the card is under 640 px wide.
+const listStyle = m => `
+    .${m} .th{display:none}.${m} .tr{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 14px}.${m} .td.id{grid-column:1/-1}
+    .${m} .td:not(.id)::before{content:attr(data-label) ": ";color:var(--secondary-text-color);font-size:12px}.${m} .td.blank{display:none}
+    .${m} dl{grid-template-columns:minmax(0,1fr)}.${m} dd{margin-bottom:6px}`;
+
 const CLIENT_STYLE = `
   ha-card{padding:0}.body{padding:16px;container-type:inline-size;container-name:clients}
   .top{display:flex;align-items:center;gap:10px}.top h2{flex:1;margin:0 0 10px;font-size:20px;font-weight:600}
@@ -567,11 +650,9 @@ const CLIENT_STYLE = `
   .rename-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}.rename-row label{font-weight:600;font-size:13px}.rename{flex:1 1 200px;min-width:0}
   dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0;font-size:13px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}
   .pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}.pagination[hidden]{display:none}.page-label{font-size:13px;color:var(--secondary-text-color)}
-  @container clients (max-width:640px){
-    .th{display:none}.tr{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 14px}.td.id{grid-column:1/-1}
-    .td:not(.id)::before{content:attr(data-label) ": ";color:var(--secondary-text-color);font-size:12px}
-    dl{grid-template-columns:minmax(0,1fr)}dd{margin-bottom:6px}
-  }
+  @container clients (max-width:640px){${listStyle("mode-auto")}
+  }${listStyle("mode-list")}
+  .mode-table .table{overflow-x:auto}.mode-table .tr{min-width:calc(var(--n) * 120px)}
 `;
 
 if (!customElements.get("hpe-access-point-card")) customElements.define("hpe-access-point-card", HpeAccessPointCard);
