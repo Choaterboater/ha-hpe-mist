@@ -165,11 +165,11 @@ default limit is 5,000 REST calls per hour per token.
 
 ## Install
 
-HACS: add this repository as a custom repository (category *Integration*),
-install **HPE Mist**, restart Home Assistant.
+HACS (recommended): open HACS, search for **HPE Mist**, open it, select
+**Download**, then restart Home Assistant.
 
-Manual: copy `custom_components/hpe_mist` into your Home Assistant
-`config/custom_components/` folder and restart.
+Manual (if you do not use HACS): copy `custom_components/hpe_mist` into your
+Home Assistant `config/custom_components/` folder and restart.
 
 ## Set up
 
