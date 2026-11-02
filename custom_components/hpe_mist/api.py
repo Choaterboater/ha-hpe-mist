@@ -132,6 +132,11 @@ class MistClient:
             path = nxt.split("/api/v1/", 1)[-1].lstrip("/")
         return out
 
+    async def site_rrm_events(self, site_id: str, start: int, end: int) -> list[dict[str, Any]]:
+        """Why each 5 GHz radio changed channel (radar, scheduled RRM, ...) between start and end (epoch s)."""
+        data = await self.get(f"sites/{site_id}/rrm/events?band=5&start={start}&end={end}&limit=1000")
+        return (data.get("results") if isinstance(data, dict) else data) or []
+
     async def site_wlans(self, site_id: str) -> list[dict[str, Any]]:
         return await self.get(f"sites/{site_id}/wlans")
 

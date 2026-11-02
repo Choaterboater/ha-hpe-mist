@@ -20,6 +20,9 @@ Device: mac, site_id, type ("ap" | "switch" | "gateway"), name, model, serial,
         poe {draw_w, budget_w} (switches), vlans [{id, name}] (switches),
         wlans [{ssid, enabled, vlan, clients}] (APs).
 Alarm:  id, site_id, type, severity, count, acked, timestamp.
+Radar:  id, site_id, timestamp (epoch s), ap_mac, from_channel, from_width (MHz), to_channel,
+        to_width (MHz), from_mhz [low, high] (the block the radar hit), weather_radar (that block
+        touches 5600-5650 MHz, the airport weather radar band). One per radar detection Mist confirmed.
 Wlan:   id, ssid, enabled, site_id (None for an org-wide WLAN).
 Devices also carry "id", the controller's own id, for controls.
 Any value may be None when the controller does not report it (uplink, poe,
@@ -36,7 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .api import MistAuthError, MistClient, MistError, can_write_org
-from .const import DETAIL_SECONDS
+from .const import DETAIL_SECONDS, RADAR_DAYS
 from .presence import mac_key, mac_pretty
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,6 +47,7 @@ _LOGGER = logging.getLogger(__name__)
 Client = dict[str, Any]
 Device = dict[str, Any]
 Alarm = dict[str, Any]
+Radar = dict[str, Any]
 Wlan = dict[str, Any]
 Port = dict[str, Any]
 CLIENT_KEYS = ("mac", "site_id", "ip", "hostname", "manufacture", "ssid", "ap_mac", "rssi")
@@ -61,6 +65,7 @@ class Snapshot:
     clients: list[Client] = field(default_factory=list)  # connected now
     devices: list[Device] = field(default_factory=list)
     alarms: list[Alarm] = field(default_factory=list)
+    radar: list[Radar] = field(default_factory=list)  # newest first
 
 
 class PresenceSource(Protocol):
@@ -391,6 +396,47 @@ def alarm_from_mist(a: dict[str, Any]) -> Alarm:
     }
 
 
+# 5 GHz channel blocks per width: a radio on any channel of a block uses all of it.
+_BLOCKS = {
+    40: [(36, 40), (44, 48), (52, 56), (60, 64), (100, 104), (108, 112), (116, 120), (124, 128),
+         (132, 136), (140, 144), (149, 153), (157, 161), (165, 169), (173, 177)],
+    80: [(36, 48), (52, 64), (100, 112), (116, 128), (132, 144), (149, 161), (165, 177)],
+    160: [(36, 64), (100, 128), (149, 177)],
+}
+WEATHER_RADAR_MHZ = (5600, 5650)  # Terminal Doppler Weather Radar, near airports
+
+
+def channel_mhz(channel: int, width: int | None) -> tuple[int, int]:
+    """The frequencies (MHz) a 5 GHz radio covers on channel at width."""
+    first = last = channel
+    for lo, hi in _BLOCKS.get(width or 20, []):
+        if lo <= channel <= hi:
+            first, last = lo, hi
+    return 5000 + 5 * first - 10, 5000 + 5 * last + 10
+
+
+def radar_from_mist(r: dict[str, Any], site_id: str) -> Radar | None:
+    """A confirmed radar detection, or None for every other channel change."""
+    ch, ts = _int(r.get("pre_channel")), _int(r.get("timestamp"))
+    if r.get("event") != "radar-detected" or ch is None or ts is None:
+        return None
+    width = _int(r.get("pre_bandwidth")) or _int(r.get("bandwidth"))
+    lo, hi = channel_mhz(ch, width)
+    ap = mac_key(r.get("ap") or r.get("ap_id"))
+    return {
+        "id": f"{ap}_{ts}",
+        "site_id": site_id,
+        "timestamp": ts,
+        "ap_mac": ap,
+        "from_channel": ch,
+        "from_width": width,
+        "to_channel": _int(r.get("channel")),
+        "to_width": _int(r.get("bandwidth")),
+        "from_mhz": [lo, hi],
+        "weather_radar": lo < WEATHER_RADAR_MHZ[1] and hi > WEATHER_RADAR_MHZ[0],
+    }
+
+
 class MistSource:
     """HPE Mist: REST sweep of every site in the org, plus the websocket stream."""
 
@@ -400,6 +446,8 @@ class MistSource:
         self._sites: dict[str, str] = {}
         self._ports: dict[str, dict[str, dict[str, Port]]] = {}  # site -> device mac -> ports
         self._ports_at: dict[str, float] = {}
+        self._radar: dict[str, list[Radar]] = {}  # site -> radar detections
+        self._radar_at: dict[str, float] = {}
 
     @property
     def has_stream(self) -> bool:
@@ -441,8 +489,24 @@ class MistSource:
             for dev in found:
                 merge_ports(dev, self._ports.get(site, {}).get(dev["mac"]))
             devices.extend(found)
+            await self._refresh_radar(site)
         alarms = [alarm_from_mist(a) for a in await self.client.org_alarms(self.org_id)]
-        return Snapshot(sites=dict(sites), clients=clients, devices=[d for d in devices if d["mac"]], alarms=alarms)
+        radar = sorted((r for site in sites for r in self._radar.get(site, [])), key=lambda r: -r["timestamp"])
+        return Snapshot(sites=dict(sites), clients=clients, devices=[d for d in devices if d["mac"]], alarms=alarms,
+                        radar=radar)
+
+    async def _refresh_radar(self, site: str) -> None:
+        """Radar detections of the last RADAR_DAYS, at most every DETAIL_SECONDS; kept between, never fails the sweep."""
+        now = time.time()
+        if now - self._radar_at.get(site, 0.0) < DETAIL_SECONDS - _DETAIL_SLACK_SECONDS:
+            return
+        self._radar_at[site] = now
+        try:
+            rows = await self.client.site_rrm_events(site, int(now) - RADAR_DAYS * 86400, int(now))
+        except MistError as err:
+            _LOGGER.debug("Mist radar events for site %s not refreshed: %s", site, err)
+            return
+        self._radar[site] = [r for r in (radar_from_mist(x, site) for x in rows) if r]
 
     async def _refresh_ports(self, site: str) -> None:
         """One port search per site at most every DETAIL_SECONDS; kept between, never fails the sweep."""

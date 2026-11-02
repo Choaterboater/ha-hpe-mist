@@ -8,7 +8,8 @@ Brings an HPE Mist org into Home Assistant so anything in it can drive an
 automation. One config entry per org gives you:
 
 - **A device per site**: clients (total, wireless, wired), clients per SSID, APs
-  online / offline, active alarms, an **Events** entity (see below) and a
+  online / offline, active alarms, **Radar detections** (DFS radar hits Mist
+  confirmed in the last 30 days), an **Events** entity (see below) and a
   diagnostic **Live stream** binary sensor (on while the websocket stream is
   connected).
 - **A device per AP, switch and gateway** (under its site): online, clients, and as
@@ -51,6 +52,7 @@ rows and kept out of the recorder.
 | `ports_up` | switch / gateway | physical ports up | `ports_total`, `ports`: [{port, up, speed, uplink, poe_w, neighbor, neighbor_port, vlan, description}] in natural port order |
 | `poe_draw` | switch | W drawn (only on PoE switches) | `budget_w` |
 | `stream` (binary) | site | on while the live stream is connected | |
+| `radar_detections` | site | radar detections Mist confirmed in the last 30 days | `days`, `detections`: [{time, ap, model, from_channel, from_width, to_channel, to_width, from_mhz, weather_radar}] newest first |
 
 `wlans` (per AP) and `vlans` (per switch) exist in the shared design but Mist's
 device stats do not report them, so they do not appear for Mist.
@@ -91,6 +93,13 @@ Each site's **Events** entity fires, with details as attributes:
 | `device_down` | a sweep reports an AP / switch / gateway disconnected | mac, name, type, model |
 | `device_up` | it is back (stream: seconds; sweep otherwise) | same |
 | `alarm` | a new Mist alarm for the site | id, type, severity, count, timestamp |
+| `radar_detected` | Mist confirms a DFS radar hit (within 5 minutes) | time, ap, model, from_channel, from_width, to_channel, to_width, from_mhz, weather_radar, clients (on that AP's 5 GHz radio) |
+
+A radar detection is Mist's own RRM record (`event: radar-detected`), not a
+guess from a channel change: Mist's nightly RRM and automatic channel picks are
+left out. `from_mhz` is the whole block the radio used (124 at 40 MHz covers
+124 + 128, 5610 to 5650 MHz); `weather_radar` is true when that block touches 5600
+to 5650 MHz, the band of the Terminal Doppler Weather Radars at large airports.
 
 Use them as triggers: *Entity* → the site's Events entity → *attribute
 event_type*, or a template condition on `trigger.to_state.attributes`. The first
@@ -143,9 +152,10 @@ the *Online* binary sensor shows off.
 One sweep is **2 calls per site + 1 per org**: `sites/<site>/stats/clients`,
 `sites/<site>/stats/devices?type=all` and `orgs/<org>/alarms/search`. Sites with a
 switch or gateway add one `sites/<site>/stats/ports/search` at most every 5
-minutes (kept between sweeps). With the stream up that is about
-**(3 × sites + 1) × 12 calls per hour** (84 per hour for two sites); with it down,
-(2 × sites + 1) × 120 + sites × 12. Add one `orgs/<org>/sites` call after a start
+minutes (kept between sweeps), and every site one `sites/<site>/rrm/events?band=5`
+(radar detections) at most every 5 minutes. With the stream up that is about
+**(4 × sites + 1) × 12 calls per hour** (108 per hour for two sites); with it down,
+(2 × sites + 1) × 120 + 2 × sites × 12. Add one `orgs/<org>/sites` call after a start
 or an error. Opening the options runs `sites/<site>/stats/clients` per site plus
 `orgs/<org>/clients/search` and `orgs/<org>/wired_clients/search` (last 7 days,
 up to 5 pages each); these searches never run in the background. With a token

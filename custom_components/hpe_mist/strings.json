@@ -75,6 +75,9 @@
       "active_alarms": {
         "name": "Active alarms"
       },
+      "radar_detections": {
+        "name": "Radar detections"
+      },
       "ssid_clients": {
         "name": "Clients on {ssid}"
       },
@@ -160,7 +163,8 @@
               "client_left": "Client left",
               "device_down": "Device down",
               "device_up": "Device up",
-              "alarm": "Alarm"
+              "alarm": "Alarm",
+              "radar_detected": "Radar detected"
             }
           }
         }

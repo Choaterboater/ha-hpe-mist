@@ -27,8 +27,11 @@ from .const import (
     EVENT_CLIENT_LEFT,
     EVENT_DEVICE_DOWN,
     EVENT_DEVICE_UP,
+    EVENT_RADAR,
     MAX_BACKOFF_SECONDS,
+    MAX_LIST_ROWS,
     POLL_SECONDS,
+    RADAR_EVENT_SECONDS,
     SAFETY_SWEEP_SECONDS,
     STREAM_RETRY_SECONDS,
     UNAVAILABLE_AFTER_SECONDS,
@@ -37,7 +40,7 @@ from .errors import SourceAuthError, SourceBusyError, SourceError
 from .names import saved_name
 from .presence import PresenceTracker, Sighting, mac_key, mac_pretty
 from .seen import SeenClients
-from .source import Alarm, Client, Device, PresenceSource, Snapshot, Wlan
+from .source import Alarm, Client, Device, PresenceSource, Radar, Snapshot, Wlan
 
 
 @callback
@@ -67,6 +70,7 @@ class MistData:
     devices: dict[str, Device] = field(default_factory=dict)  # mac -> device
     clients: dict[str, Sighting] = field(default_factory=dict)  # mac -> sighting (all ever seen)
     alarms: list[Alarm] = field(default_factory=list)
+    radar: list[Radar] = field(default_factory=list)  # confirmed radar detections, newest first
     wlans: dict[str, Wlan] = field(default_factory=dict)  # id -> WLAN; only fetched when the token can write
 
     def active_alarms(self, site_id: str) -> int:
@@ -104,6 +108,7 @@ class HpeMistCoordinator(DataUpdateCoordinator[MistData]):
         self._wlans_at = 0.0
         self._seeded = False
         self._alarm_ids: set[Any] = set()
+        self._radar_ids: set[str] = set()
         self._last_ok: float | None = None
         self._backoff = 0.0
 
@@ -164,8 +169,29 @@ class HpeMistCoordinator(DataUpdateCoordinator[MistData]):
                 if alarm["id"] not in self._alarm_ids:
                     details = {k: alarm[k] for k in ("id", "type", "severity", "count", "timestamp")}
                     self._emit(alarm["site_id"], EVENT_ALARM, details)
+            # Only fresh detections: a first good radar fetch after an outage lists a month of old ones.
+            for r in snap.radar:
+                if r["id"] not in self._radar_ids and now - r["timestamp"] <= RADAR_EVENT_SECONDS:
+                    self._emit(r["site_id"], EVENT_RADAR, self.radar_row(r))
         self._alarm_ids = {a["id"] for a in snap.alarms}
+        self.mist.radar = snap.radar
+        self._radar_ids = {r["id"] for r in snap.radar}
         self._seeded = True
+
+    @callback
+    def radar_row(self, r: Radar, with_clients: bool = True) -> dict[str, Any]:
+        """A radar detection as an event (with the clients on that AP's 5 GHz radio now) or a sensor row."""
+        dev = self.mist.devices.get(r["ap_mac"]) or {}
+        row = {
+            "time": datetime.fromtimestamp(r["timestamp"]).astimezone().isoformat(),
+            "ap": dev.get("name") or mac_pretty(r["ap_mac"]),
+            "model": dev.get("model"),
+            **{k: r[k] for k in ("from_channel", "from_width", "to_channel", "to_width", "from_mhz", "weather_radar")},
+        }
+        if with_clients:
+            row["clients"] = sorted(self.client_name(s) for s in self.mist.clients.values()
+                                    if s.home and s.ap_mac == r["ap_mac"] and s.band == "5 GHz")[:MAX_LIST_ROWS]
+        return row
 
     def _failed(self, err: SourceError, now: float) -> MistData:
         """Keep the last state through short trouble; unavailable after that, never not_home."""

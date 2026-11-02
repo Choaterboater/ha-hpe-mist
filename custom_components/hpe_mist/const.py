@@ -17,7 +17,8 @@ EVENT_CLIENT_LEFT = "client_left"
 EVENT_DEVICE_DOWN = "device_down"
 EVENT_DEVICE_UP = "device_up"
 EVENT_ALARM = "alarm"
-EVENT_TYPES = [EVENT_CLIENT_JOINED, EVENT_CLIENT_LEFT, EVENT_DEVICE_DOWN, EVENT_DEVICE_UP, EVENT_ALARM]
+EVENT_RADAR = "radar_detected"
+EVENT_TYPES = [EVENT_CLIENT_JOINED, EVENT_CLIENT_LEFT, EVENT_DEVICE_DOWN, EVENT_DEVICE_UP, EVENT_ALARM, EVENT_RADAR]
 
 # Mist clouds (REST host); the stream host is the same with "api." -> "api-ws.".
 MIST_CLOUDS = {
@@ -43,6 +44,10 @@ SAFETY_SWEEP_SECONDS = 300
 # Per-switch port details (one search per site) are fetched at most this often
 # and kept between sweeps.
 DETAIL_SECONDS = SAFETY_SWEEP_SECONDS
+# Radar detections (Mist's RRM events, 5 GHz) are listed for this many days; fetched like port details.
+RADAR_DAYS = 30
+# A detection fires the site event only if it is at most this old when first listed.
+RADAR_EVENT_SECONDS = 3600
 # Searches (ports, clients seen in the last 7 days) follow at most this many pages.
 SEARCH_MAX_PAGES = 5
 # Every client a sweep lists is remembered (for the options picker) until it has

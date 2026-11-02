@@ -1,6 +1,7 @@
 """Config flow, options flow, stream + sweep presence, with Home Assistant's test helpers and a fake Mist."""
 
 import asyncio
+import time
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -20,7 +21,7 @@ from custom_components.hpe_mist.const import (
     SAFETY_SWEEP_SECONDS,
 )
 from custom_components.hpe_mist.coordinator import STREAM_TASK_NAME
-from custom_components.hpe_mist.source import MistSource
+from custom_components.hpe_mist.source import MistSource, channel_mhz, radar_from_mist
 
 HOST = "api.mist.com"
 BASE = f"https://{HOST}/api/v1/"
@@ -115,8 +116,14 @@ def stream():
         yield fake
 
 
+def rrm_row(ap_id, pre_channel, channel, ts, event="radar-detected", width=40):
+    """One row of sites/<site>/rrm/events (trimmed from a real answer; Mist writes ap_id with dashes)."""
+    return {"ap_id": ap_id, "band": "5", "event": event, "pre_channel": pre_channel, "channel": channel,
+            "pre_bandwidth": width, "bandwidth": width, "timestamp": ts, "power": 11, "pre_power": 11}
+
+
 def mist(aioclient_mock, clients=None, status=200, host=HOST, devices=None, alarms=None, role="read",
-         ports=None, ports_status=200, seen=None, seen_wired=None, seen_status=200):
+         ports=None, ports_status=200, seen=None, seen_wired=None, seen_status=200, radar=None, radar_status=200):
     base = f"https://{host}/api/v1/"
     aioclient_mock.clear_requests()
     aioclient_mock.get(base + "self", json={"privileges": [
@@ -136,6 +143,9 @@ def mist(aioclient_mock, clients=None, status=200, host=HOST, devices=None, alar
                        json={"results": seen or []}, status=seen_status)
     aioclient_mock.get(base + f"orgs/{ORG}/wired_clients/search?duration=7d&limit=1000",
                        json={"results": seen_wired or []}, status=seen_status)
+    # The real query also has start and end; the mocker matches on a subset of the query.
+    aioclient_mock.get(base + f"sites/{SITE}/rrm/events?band=5&limit=1000",
+                       json={"results": radar or []}, status=radar_status)
 
 
 def sweeps(aioclient_mock) -> int:
@@ -584,6 +594,66 @@ async def test_device_down_event_from_sweep(hass, aioclient_mock, stream, freeze
     await tick(hass, freezer)
     assert seen == ["device_down"]
     assert events_of(hass).attributes["name"] == "Switch 1"
+
+
+def radar_calls(aioclient_mock) -> int:
+    return sum(1 for c in aioclient_mock.mock_calls if "/rrm/events" in str(c[1]))
+
+
+async def test_radar_detections_sensor_and_event(hass, aioclient_mock, stream, freezer):
+    now = int(time.time())
+    old = rrm_row("02-00-00-00-00-01", 124, 157, now - 2 * 86400)
+    nightly = rrm_row("02-00-00-00-00-01", 36, 44, now - 86400, event="scheduled-site-rrm")
+    mist(aioclient_mock, [PHONE_A], radar=[old, nightly])
+    await setup(hass)
+    seen = []
+    hass.bus.async_listen("state_changed", lambda e: e.data["entity_id"] == "event.site_1_events" and seen.append(
+        e.data["new_state"].attributes.get("event_type")))
+
+    # Only radar counts, and a month of history fires no events.
+    sensor = hass.states.get("sensor.site_1_radar_detections")
+    assert sensor.state == "1" and sensor.attributes["days"] == 30
+    row = sensor.attributes["detections"][0]
+    assert (row["ap"], row["model"], row["from_channel"], row["from_width"], row["to_channel"]) == (
+        "AP 1", "AP-EXAMPLE", 124, 40, 157)
+    assert row["from_mhz"] == [5610, 5650] and row["weather_radar"] is True
+    assert "clients" not in row  # who is on the radio now says nothing about then
+
+    # A fresh detection fires the event with the clients on that AP's 5 GHz radio; the cached list is
+    # used until the 5 minutes are up.
+    fresh = rrm_row("02-00-00-00-00-01", 116, 149, now + 60)
+    mist(aioclient_mock, [PHONE_A], radar=[old, nightly, fresh])
+    await tick(hass, freezer)
+    assert radar_calls(aioclient_mock) == 0 and seen == []
+    await tick(hass, freezer, SAFETY_SWEEP_SECONDS + 1)
+    assert seen == ["radar_detected"]
+    ev = events_of(hass).attributes
+    assert ev["ap"] == "AP 1" and ev["from_channel"] == 116 and ev["to_channel"] == 149
+    assert ev["from_mhz"] == [5570, 5610] and ev["weather_radar"] is True  # 5600-5610 is in the band
+    assert ev["clients"] == ["Test Phone"]
+    assert hass.states.get("sensor.site_1_radar_detections").state == "2"
+    assert hass.states.get("sensor.site_1_radar_detections").attributes["detections"][0]["from_channel"] == 116
+
+    # One that only now shows up but is days old is listed, not fired; a failed fetch keeps the list.
+    late = rrm_row("02-00-00-00-00-01", 60, 100, now - 3 * 86400)
+    mist(aioclient_mock, [PHONE_A], radar=[old, nightly, fresh, late])
+    await tick(hass, freezer, SAFETY_SWEEP_SECONDS + 1)
+    assert seen == ["radar_detected"]
+    assert hass.states.get("sensor.site_1_radar_detections").state == "3"
+    mist(aioclient_mock, [PHONE_A], radar_status=500)
+    await tick(hass, freezer, SAFETY_SWEEP_SECONDS + 1)
+    assert hass.states.get(ENTITY).state == STATE_HOME
+    assert hass.states.get("sensor.site_1_radar_detections").state == "3"
+
+
+def test_channel_blocks():
+    assert channel_mhz(124, 40) == (5610, 5650)
+    assert channel_mhz(116, 80) == (5570, 5650)
+    assert channel_mhz(100, 160) == (5490, 5650)
+    assert channel_mhz(149, 20) == (5735, 5755)
+    assert channel_mhz(144, None) == (5710, 5730)
+    # Below the weather radar band: 100+104 ends at 5530 MHz.
+    assert radar_from_mist(rrm_row("02-00-00-00-00-01", 100, 36, 1), SITE)["weather_radar"] is False
 
 
 # --- controls ---------------------------------------------------------------------

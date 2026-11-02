@@ -26,7 +26,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HpeMistConfigEntry
-from .const import MAX_LIST_ROWS
+from .const import MAX_LIST_ROWS, RADAR_DAYS
 from .coordinator import HpeMistCoordinator
 from .entity import (
     MistEntity,
@@ -43,7 +43,7 @@ from .source import BANDS, Device
 
 _DIAG = EntityCategory.DIAGNOSTIC
 # Lists can be long and change every sweep: kept out of the recorder.
-_LIST_ATTRIBUTES = frozenset({"clients", "radios", "ports", "wlans", "vlans"})
+_LIST_ATTRIBUTES = frozenset({"clients", "radios", "ports", "wlans", "vlans", "detections"})
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -121,7 +121,16 @@ SITE_SENSORS = (
                           value_fn=lambda c, s: _aps(c, s, False)),
     MistSensorDescription(key="active_alarms", translation_key="active_alarms", state_class=SensorStateClass.MEASUREMENT,
                           value_fn=lambda c, s: c.mist.active_alarms(s)),
+    MistSensorDescription(key="radar_detections", translation_key="radar_detections",
+                          state_class=SensorStateClass.MEASUREMENT, value_fn=lambda c, s: len(_radar(c, s)),
+                          attrs_fn=lambda c, s: {"days": RADAR_DAYS, "detections": [
+                              c.radar_row(r, with_clients=False) for r in _radar(c, s)[:MAX_LIST_ROWS]]}),
 )
+
+
+def _radar(c: HpeMistCoordinator, site: str) -> list[dict[str, Any]]:
+    """Radar detections Mist confirmed at the site in the last RADAR_DAYS, newest first."""
+    return [r for r in c.mist.radar if r["site_id"] == site]
 
 
 # --- per AP / switch / gateway: value_fn(device) --------------------------------
