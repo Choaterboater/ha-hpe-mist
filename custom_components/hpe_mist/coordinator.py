@@ -186,7 +186,7 @@ class HpeMistCoordinator(DataUpdateCoordinator[MistData]):
             "time": datetime.fromtimestamp(r["timestamp"]).astimezone().isoformat(),
             "ap": dev.get("name") or mac_pretty(r["ap_mac"]),
             "model": dev.get("model"),
-            **{k: r[k] for k in ("from_channel", "from_width", "to_channel", "to_width", "from_mhz", "weather_radar")},
+            **{k: r[k] for k in ("from_channel", "from_width", "to_channel", "to_width", "from_mhz")},
         }
         if with_clients:
             row["clients"] = sorted(self.client_name(s) for s in self.mist.clients.values()

@@ -21,8 +21,7 @@ Device: mac, site_id, type ("ap" | "switch" | "gateway"), name, model, serial,
         wlans [{ssid, enabled, vlan, clients}] (APs).
 Alarm:  id, site_id, type, severity, count, acked, timestamp.
 Radar:  id, site_id, timestamp (epoch s), ap_mac, from_channel, from_width (MHz), to_channel,
-        to_width (MHz), from_mhz [low, high] (the block the radar hit), weather_radar (that block
-        touches 5600-5650 MHz, the airport weather radar band). One per radar detection Mist confirmed.
+        to_width (MHz), from_mhz [low, high] (the block the radar hit). One per radar detection Mist confirmed.
 Wlan:   id, ssid, enabled, site_id (None for an org-wide WLAN).
 Devices also carry "id", the controller's own id, for controls.
 Any value may be None when the controller does not report it (uplink, poe,
@@ -403,7 +402,6 @@ _BLOCKS = {
     80: [(36, 48), (52, 64), (100, 112), (116, 128), (132, 144), (149, 161), (165, 177)],
     160: [(36, 64), (100, 128), (149, 177)],
 }
-WEATHER_RADAR_MHZ = (5600, 5650)  # Terminal Doppler Weather Radar, near airports
 
 
 def channel_mhz(channel: int, width: int | None) -> tuple[int, int]:
@@ -433,7 +431,6 @@ def radar_from_mist(r: dict[str, Any], site_id: str) -> Radar | None:
         "to_channel": _int(r.get("channel")),
         "to_width": _int(r.get("bandwidth")),
         "from_mhz": [lo, hi],
-        "weather_radar": lo < WEATHER_RADAR_MHZ[1] and hi > WEATHER_RADAR_MHZ[0],
     }
 
 

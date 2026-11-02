@@ -52,7 +52,7 @@ rows and kept out of the recorder.
 | `ports_up` | switch / gateway | physical ports up | `ports_total`, `ports`: [{port, up, speed, uplink, poe_w, neighbor, neighbor_port, vlan, description}] in natural port order |
 | `poe_draw` | switch | W drawn (only on PoE switches) | `budget_w` |
 | `stream` (binary) | site | on while the live stream is connected | |
-| `radar_detections` | site | radar detections Mist confirmed in the last 30 days | `days`, `detections`: [{time, ap, model, from_channel, from_width, to_channel, to_width, from_mhz, weather_radar}] newest first |
+| `radar_detections` | site | radar detections Mist confirmed in the last 30 days | `days`, `detections`: [{time, ap, model, from_channel, from_width, to_channel, to_width, from_mhz}] newest first |
 
 `wlans` (per AP) and `vlans` (per switch) exist in the shared design but Mist's
 device stats do not report them, so they do not appear for Mist.
@@ -93,13 +93,12 @@ Each site's **Events** entity fires, with details as attributes:
 | `device_down` | a sweep reports an AP / switch / gateway disconnected | mac, name, type, model |
 | `device_up` | it is back (stream: seconds; sweep otherwise) | same |
 | `alarm` | a new Mist alarm for the site | id, type, severity, count, timestamp |
-| `radar_detected` | Mist confirms a DFS radar hit (within 5 minutes) | time, ap, model, from_channel, from_width, to_channel, to_width, from_mhz, weather_radar, clients (on that AP's 5 GHz radio) |
+| `radar_detected` | Mist confirms a DFS radar hit (within 5 minutes) | time, ap, model, from_channel, from_width, to_channel, to_width, from_mhz, clients (on that AP's 5 GHz radio) |
 
 A radar detection is Mist's own RRM record (`event: radar-detected`), not a
 guess from a channel change: Mist's nightly RRM and automatic channel picks are
 left out. `from_mhz` is the whole block the radio used (124 at 40 MHz covers
-124 + 128, 5610 to 5650 MHz); `weather_radar` is true when that block touches 5600
-to 5650 MHz, the band of the Terminal Doppler Weather Radars at large airports.
+124 + 128, 5610 to 5650 MHz).
 
 Use them as triggers: *Entity* → the site's Events entity → *attribute
 event_type*, or a template condition on `trigger.to_state.attributes`. The first

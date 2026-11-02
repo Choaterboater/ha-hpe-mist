@@ -616,7 +616,7 @@ async def test_radar_detections_sensor_and_event(hass, aioclient_mock, stream, f
     row = sensor.attributes["detections"][0]
     assert (row["ap"], row["model"], row["from_channel"], row["from_width"], row["to_channel"]) == (
         "AP 1", "AP-EXAMPLE", 124, 40, 157)
-    assert row["from_mhz"] == [5610, 5650] and row["weather_radar"] is True
+    assert row["from_mhz"] == [5610, 5650]
     assert "clients" not in row  # who is on the radio now says nothing about then
 
     # A fresh detection fires the event with the clients on that AP's 5 GHz radio; the cached list is
@@ -629,7 +629,7 @@ async def test_radar_detections_sensor_and_event(hass, aioclient_mock, stream, f
     assert seen == ["radar_detected"]
     ev = events_of(hass).attributes
     assert ev["ap"] == "AP 1" and ev["from_channel"] == 116 and ev["to_channel"] == 149
-    assert ev["from_mhz"] == [5570, 5610] and ev["weather_radar"] is True  # 5600-5610 is in the band
+    assert ev["from_mhz"] == [5570, 5610]
     assert ev["clients"] == ["Test Phone"]
     assert hass.states.get("sensor.site_1_radar_detections").state == "2"
     assert hass.states.get("sensor.site_1_radar_detections").attributes["detections"][0]["from_channel"] == 116
@@ -652,8 +652,9 @@ def test_channel_blocks():
     assert channel_mhz(100, 160) == (5490, 5650)
     assert channel_mhz(149, 20) == (5735, 5755)
     assert channel_mhz(144, None) == (5710, 5730)
-    # Below the weather radar band: 100+104 ends at 5530 MHz.
-    assert radar_from_mist(rrm_row("02-00-00-00-00-01", 100, 36, 1), SITE)["weather_radar"] is False
+    # Every other channel change is not a radar detection.
+    assert radar_from_mist(rrm_row("02-00-00-00-00-01", 100, 36, 1, event="scheduled-site-rrm"), SITE) is None
+    assert radar_from_mist(rrm_row("02-00-00-00-00-01", 100, 36, 1), SITE)["from_mhz"] == [5490, 5530]
 
 
 # --- controls ---------------------------------------------------------------------
